@@ -1,0 +1,13 @@
+{
+  "name": "clearline-signer",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "ethers": "^6.13.4"
+  }
+}

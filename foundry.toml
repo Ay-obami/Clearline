@@ -1,0 +1,19 @@
+[profile.default]
+solc = "0.8.28"
+src = "src"
+out = "out"
+libs = ["lib"]
+optimizer = true
+optimizer_runs = 800
+via_ir = false
+verbosity = 2
+fs_permissions = [{ access = "read", path = "./"}]
+
+[rpc_endpoints]
+hsk_testnet = "${HSK_TESTNET_RPC}"
+localhost = "${LOCAL_RPC}"
+
+[fmt]
+line_length = 100
+
+# See more: https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

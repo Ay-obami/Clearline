@@ -1,0 +1,17 @@
+# Compiler and build artifacts
+cache/
+out/
+broadcast/
+
+# Dotenv
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+
+# Misc
+.DS_Store
+coverage/
+lcov.info
