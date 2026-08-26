@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  /* Font families registered by @fontsource (imported in app/layout.tsx). */
+  --font-inter: "Inter";
+  --font-jetbrains: "JetBrains Mono";
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-bg text-body antialiased;
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* On-chain data always reads as monospace — a quiet signal of technical seriousness. */
+.mono {
+  @apply font-mono;
+}
+
+.card {
+  @apply bg-card border border-line rounded-[10px] shadow-card;
+}
+
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-[8px] bg-brand px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#18583A] disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+.btn-secondary {
+  @apply inline-flex items-center justify-center gap-2 rounded-[8px] border border-line bg-white px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-bg disabled:opacity-50;
+}
+
+/** Minimal, purposeful motion (PRD §5.5). */
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.pulse-soft {
+  animation: pulse-soft 1.8s ease-in-out infinite;
+}
+
+@keyframes check-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+.check-in {
+  animation: check-in 0.35s ease-out forwards;
+}
