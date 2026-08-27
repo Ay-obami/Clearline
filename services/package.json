@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit",
+    "start": "node dist/scripts/start.js",
     "start:signer": "tsx signer/src/index.ts",
     "start:custodian": "tsx custodian/src/index.ts"
   },

@@ -31,7 +31,8 @@ async function main() {
   });
 
   // Health endpoint (Railway-friendly, no secret exposure).
-  const port = Number(process.env.HEALTH_PORT || 8080);
+  // Railway injects PORT and healthchecks it; HEALTH_PORT is our own override.
+  const port = Number(process.env.HEALTH_PORT || process.env.PORT || 8080);
   createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true, service: "signer", signedCount: signer.signedCount }));

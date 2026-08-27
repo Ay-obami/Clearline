@@ -33,7 +33,7 @@ async function main() {
     delayMs: Number(process.env.SETTLEMENT_DELAY_MS ?? 15000),
   });
 
-  const port = Number(process.env.HEALTH_PORT || 8081);
+  const port = Number(process.env.HEALTH_PORT || process.env.PORT || 8081);
   createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true, service: "custodian", settleCount: custodian.settleCount }));
