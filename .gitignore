@@ -15,3 +15,8 @@ node_modules/
 .DS_Store
 coverage/
 lcov.info
+
+# deployment address files are environment-local
+/deployments/*.env
+!/deployments/*.env.example
+/frontend/.next/

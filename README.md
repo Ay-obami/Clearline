@@ -76,6 +76,10 @@ cp signer/.env.example signer/.env       # fill in key + addresses
 cp custodian/.env.example custodian/.env # fill in key + addresses
 npm run dev --workspace @clearline/signer
 npm run dev --workspace @clearline/custodian
+
+# One-command E2E replay of every pipeline path (local anvil, post-deploy):
+../scripts/demo-local.sh   # happy path, KYC-revoke rejection, board override,
+                           # request/lock finalize + cancel branches
 ```
 
 ### Local end-to-end demo (Anvil)
