@@ -109,9 +109,33 @@ service `.env` files.
 - Foundry suite: **44 tests passing**, ~90.6% average coverage on Core contracts — including
   reorg/finality edge cases, compliance-flag routing to manual review, threshold-exceeded
   review, signature replay rejection, and unauthorized-signer rejection.
+- **Live end-to-end rehearsal** (local Anvil + 3 signer services + mock custodian running):
+  - Happy path: burn → 12-block finality wait → permissionless `confirmFinality` → keeper
+    `runCheck` → Approved → **2-of-3 EIP-712 signatures collected by the independent signer
+    processes** → custodian settlement posted → **Settled ~56s after trigger**, audit record
+    fully populated (source/compliance/instruction hashes, timestamps).
+  - Flagged path: redemption to an unverified destination auto-routed to manual review →
+    board override approved 2-of-2 → signers resumed automatically → **Signed within ~6s,
+    Settled within ~18s of override** — the human checkpoint preserved, not a dead end.
+  - Signer race resilience observed: concurrent duplicate submissions revert cleanly and
+    the service continues (no crashes, threshold still enforced).
 - CI runs `forge test`, `forge coverage`, and typechecks for frontend + services on every push.
 - Extension adapters (issuer-initiated, scheduled, threshold) are interface-ready via
   `ITriggerAdapter`; PRD §5.1 records them as documented specs rather than rushed code.
+
+### Local demo accounts (Anvil only — zero-value dev keys)
+
+| Role | Address | Private key |
+| --- | --- | --- |
+| Holder / redeemer (browser) | `0x70997970C51812dc3A010C7d01b50e0d17dc79C8` | `0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d` |
+| Deployer / compliance keeper | `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` | Anvil account #0 |
+| Signers ×3 | #3, #4, #5 | — |
+| Circuit-breaker board ×2 | #6, #7 | — |
+| Settlement attestor | #8 | custodian service key |
+
+Import the holder key into MetaMask (add network `http://127.0.0.1:8545`, chainId 31337),
+open the dashboard, and you'll see redemptions #1 and #2 with their full audit trails.
+
 
 ## Demo-day checklist (PRD §9.9)
 
