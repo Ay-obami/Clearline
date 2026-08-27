@@ -3,9 +3,13 @@
  * On Vercel only public values are needed — no secrets (PRD §9.5).
  */
 export const config = {
+  // Network identity comes entirely from env so the SAME build serves
+  // testnet (Vercel project A) or mainnet (project B) — never hardcode here.
   chainId: Number(process.env.NEXT_PUBLIC_CHAIN_ID || 133),
   rpcUrl: process.env.NEXT_PUBLIC_RPC_URL || "https://testnet.hsk.xyz",
-  explorer: process.env.NEXT_PUBLIC_EXPLORER || "https://explorer-testnet.hsk.xyz/",
+  explorer: process.env.NEXT_PUBLIC_EXPLORER || "https://testnet-explorer.hskchain.net/",
+  chainName: process.env.NEXT_PUBLIC_CHAIN_NAME || "HSK Chain Testnet",
+  environment: process.env.NEXT_PUBLIC_ENVIRONMENT || "testnet", // "testnet" | "mainnet"
 
   // Addresses are surfaced after deployment; the values below are foundry
   // anvil-derived placeholders so the UI runs from a clean checkout.

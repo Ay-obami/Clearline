@@ -11,6 +11,7 @@ fs_permissions = [{ access = "read", path = "./"}]
 
 [rpc_endpoints]
 hsk_testnet = "${HSK_TESTNET_RPC}"
+hsk_mainnet = "${HSK_MAINNET_RPC}"
 localhost = "${LOCAL_RPC}"
 
 [fmt]

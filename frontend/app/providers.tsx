@@ -10,7 +10,7 @@ import { config } from "@/lib/contracts";
 // judging, public testnet otherwise).
 const hsk = defineChain({
   id: config.chainId,
-  name: "HSK Chain Testnet",
+  name: config.chainName,
   nativeCurrency: { name: "HSK", symbol: "HSK", decimals: 18 },
   rpcUrls: { default: { http: [config.rpcUrl] } },
 });
