@@ -38,6 +38,31 @@ BAL=$(cast balance "$DEPLOYER" --rpc-url "$RPC_URL")
 echo "deployer balance: $(cast from-wei "$BAL") HSK"
 [ "$BAL" = "0" ] && { echo "FATAL: deployer has 0 HSK — fund it first"; exit 1; }
 
+# --------------------------------------------------- can we afford it? (dry-run)
+export HSK_MAINNET_RPC="$RPC_URL"
+echo "== estimating deployment cost (dry-run, no broadcast) =="
+SIM_LOG=$(mktemp)
+forge script script/Deploy.s.sol:ClearlineDeploy --rpc-url hsk_mainnet > "$SIM_LOG" 2>&1 \
+  || { echo "FATAL: deployment simulation failed:"; tail -5 "$SIM_LOG"; rm -f "$SIM_LOG"; exit 1; }
+GAS_TOTAL=$(grep -oE 'Estimated total gas used for script: [0-9]+' "$SIM_LOG" | grep -oE '[0-9]+' || true)
+GP=$(cast gas-price --rpc-url "$RPC_URL")
+if [ -n "$GAS_TOTAL" ]; then
+  # big-int math via python3 to avoid 64-bit overflow
+  REQUIRED_WEI=$(python3 -c "print($GAS_TOTAL * $GP)")
+  REQUIRED_HSK=$(python3 -c "print(f'{$REQUIRED_WEI / 10**18:.6f}')")
+  echo "required ≈ $REQUIRED_HSK HSK (${GAS_TOTAL} gas × ${GP} wei)"
+  python3 -c "
+import sys
+bal, req = $BAL, $REQUIRED_WEI
+if bal < req:
+    print(f'FATAL: deployer balance {bal/10**18:.6f} HSK < required {req/10**18:.6f} HSK — top up the deployer');
+    sys.exit(1)
+" || { rm -f "$SIM_LOG"; exit 1; }
+else
+  echo "WARN: could not parse gas estimate — proceeding (simulation passed)."
+fi
+rm -f "$SIM_LOG"
+
 # ------------------------------------------------- fund role wallets (gas)
 if [ "${SKIP_FUND:-0}" != "1" ]; then
   echo "== seeding role wallets =="
