@@ -33,14 +33,6 @@ contract ClearlineDeploy is Script {
             revert("MAINNET GUARD: re-run with CONFIRM_MAINNET=true to broadcast");
         }
 
-        // Tunables (defaults match the hackathon demo topology; override via env):
-        uint256 signerCount = vm.envOr("SIGNER_COUNT", uint256(3));
-        uint256 signerThreshold = vm.envOr("SIGNER_THRESHOLD", uint256(2));
-        require(signerThreshold <= signerCount && signerCount <= 10, "bad signer config");
-        uint256 boardCount = vm.envOr("BOARD_COUNT", uint256(2));
-        uint256 boardThreshold = vm.envOr("BOARD_THRESHOLD", uint256(2));
-        require(boardThreshold <= boardCount && boardCount > 0, "bad board config");
-
         vm.startBroadcast(key);
 
         // 1. Identity registry
@@ -81,28 +73,42 @@ contract ClearlineDeploy is Script {
         // FR5: optional explicit finality depth (12–20 recommended; defaults
         // live inside RedemptionRegistry). Applies chain-wide unless per-asset
         // overrides are set afterwards via setAssetFinalityDepth().
-        uint256 finalityDepth = vm.envOr("FINALITY_DEPTH", uint256(0));
-        if (finalityDepth > 0) {
-            registry.setDefaultFinalityDepth(finalityDepth);
-            registry.setAssetFinalityDepth(address(token), finalityDepth);
+        {
+            uint256 finalityDepth = vm.envOr("FINALITY_DEPTH", uint256(0));
+            if (finalityDepth > 0) {
+                registry.setDefaultFinalityDepth(finalityDepth);
+                registry.setAssetFinalityDepth(address(token), finalityDepth);
+            }
         }
 
-        address[] memory sigs = _readList("SIGNER_ADDRS", deployer, signerCount);
-        if (!_envExists("SIGNER_ADDRS")) {
-            uint256 first = _deriveFrom(deployer);
-            sigs[0] = vm.addr(first);
-            sigs[1] = vm.addr(first + 1);
-            if (signerCount >= 3) sigs[2] = vm.addr(first + 2);
+        {
+            uint256 signerCount = vm.envOr("SIGNER_COUNT", uint256(3));
+            uint256 signerThreshold = vm.envOr("SIGNER_THRESHOLD", uint256(2));
+            require(signerThreshold <= signerCount && signerCount <= 10 && signerThreshold >= 1, "bad signer cfg");
+            address[] memory sigs = _readList("SIGNER_ADDRS", deployer, signerCount);
+            if (!_envExists("SIGNER_ADDRS")) {
+                uint256 first = _deriveFrom(deployer);
+                sigs[0] = vm.addr(first);
+                sigs[1] = vm.addr(first + 1);
+                if (signerCount >= 3) sigs[2] = vm.addr(first + 2);
+            }
+            signer.setSigners(sigs, signerThreshold);
+            console2.log("SIGNERS_%d_THRESHOLD_%d", signerCount, signerThreshold);
         }
-        signer.setSigners(sigs, signerThreshold);
 
-        address[] memory board = _readList("BOARD_ADDRS", deployer, boardCount);
-        if (!_envExists("BOARD_ADDRS")) {
-            uint256 b0 = _deriveFrom(deployer) + 100;
-            board[0] = vm.addr(b0);
-            if (boardCount >= 2) board[1] = vm.addr(b0 + 1);
+        {
+            uint256 boardCount = vm.envOr("BOARD_COUNT", uint256(2));
+            uint256 boardThreshold = vm.envOr("BOARD_THRESHOLD", uint256(2));
+            require(boardThreshold <= boardCount && boardCount > 0 && boardThreshold >= 1, "bad board cfg");
+            address[] memory board = _readList("BOARD_ADDRS", deployer, boardCount);
+            if (!_envExists("BOARD_ADDRS")) {
+                uint256 b0 = _deriveFrom(deployer) + 100;
+                board[0] = vm.addr(b0);
+                if (boardCount >= 2) board[1] = vm.addr(b0 + 1);
+            }
+            breaker.setBoard(board, boardThreshold);
+            console2.log("BOARD_%d_THRESHOLD_%d", boardCount, boardThreshold);
         }
-        breaker.setBoard(board, boardThreshold);
 
         address attestor = vm.envOr("ATTESTOR_ADDR", deployer);
         settlement.setAttestor(attestor, true);
@@ -128,11 +134,8 @@ contract ClearlineDeploy is Script {
         console2.log("SIGNER_ADDRESS=%s", address(signer));
         console2.log("BREAKER_ADDRESS=%s", address(breaker));
         console2.log("SETTLEMENT_ADDRESS=%s", address(settlement));
-        console2.log("SIGNERS_%d_THRESHOLD_%d", signerCount, signerThreshold);
-        console2.log("BOARD_%d_THRESHOLD_%d", boardCount, boardThreshold);
         console2.log("ATTESTOR_ADDR=%s", attestor);
         console2.log("HOLDER_ADDR=%s", holder);
-        if (finalityDepth > 0) console2.log("FINALITY_DEPTH=%d", finalityDepth);
     }
 
     /// @dev env comma-list -> address[]; unset/garbage entries padded with `fallback_`.
