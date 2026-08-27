@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useWriteContract } from "wagmi";
+import type { Abi } from "viem";
 
 /** Pull the first human-readable line out of viem/wagmi error objects. */
 export function errText(e: unknown): string {
@@ -16,6 +17,9 @@ export function errText(e: unknown): string {
 /**
  * Small wrapper around wagmi's writeContractAsync for one-off keeper/user txs.
  * Tracks pending + error so buttons can show honest inline feedback.
+ *
+ * ABIs must already be JSON-parsed objects (parseAbi) — viem 2.55+ rejects
+ * human-readable strings on the write path (`'name' in item` throws).
  */
 export function useTx() {
   const { writeContractAsync } = useWriteContract();
@@ -25,7 +29,7 @@ export function useTx() {
 
   async function run(
     address: string,
-    abi: readonly unknown[],
+    abi: Abi,
     functionName: string,
     args: readonly unknown[]
   ): Promise<boolean> {
@@ -35,9 +39,9 @@ export function useTx() {
     try {
       await writeContractAsync({
         address: address as `0x${string}`,
-        abi: abi as never,
+        abi,
         functionName,
-        args: args as never,
+        args,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any);
       setSucceeded(functionName);

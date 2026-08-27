@@ -1,7 +1,13 @@
 /**
  * Clearline shared client config + contract ABI (src/).
  * On Vercel only public values are needed — no secrets (PRD §9.5).
+ *
+ * NOTE: ABIs here are canonical JSON objects (not human-readable strings).
+ * viem 2.55+ runs `'name' in item` in getAbiItem(), which throws on string
+ * ABIs and breaks writes via useWriteContract.
  */
+import type { Abi } from "viem";
+
 export const config = {
   // Network identity comes entirely from env so the SAME build serves
   // testnet (Vercel project A) or mainnet (project B) — never hardcode here.
@@ -25,66 +31,172 @@ export const config = {
 } as const;
 
 // ------------------------------------------------------------------
-// Contract ABIs
+// Contract ABIs — JSON-parsed objects so both reads and writes work.
 // ------------------------------------------------------------------
 
 export const registryAbi = [
-  "function statusOf(uint256 id) external view returns (uint8)",
-  "function getRedemption(uint256 id) external view returns (tuple(uint256 id,address asset,address holder,uint256 amount,address destination,uint8 triggerType,bytes32 sourceEventHash,bytes32 complianceHash,bytes32 instructionHash,bytes32 settlementRef,uint64 triggerBlock,uint64 requestedAt,uint64 settledAt,uint8 status))",
-  "function holderRedemptions(address h) external view returns (uint256[])",
-  "function assetRedemptions(address asset) external view returns (uint256[])",
-  "function redemptionCount() external view returns (uint256)",
-  "function finalityDepthFor(address asset) external view returns (uint256)",
-  "function finalityDeadlineBlock(uint256 id) external view returns (uint256)",
-  "function confirmFinality(uint256 id) external",
-  "event RedemptionTriggered(uint256 indexed id,address indexed asset,address indexed holder,uint256 amount,address destination,uint8 triggerType,bytes32 sourceEventHash)",
-  "event RedemptionRequested(uint256 indexed id,address indexed asset,address indexed holder,uint256 amount,address destination,uint8 triggerType)"
-] as const;
+  {
+    type: "function",
+    name: "statusOf",
+    stateMutability: "view",
+    inputs: [{ name: "id", type: "uint256" }],
+    outputs: [{ type: "uint8" }],
+  },
+  {
+    type: "function",
+    name: "getRedemption",
+    stateMutability: "view",
+    inputs: [{ name: "id", type: "uint256" }],
+    outputs: [
+      {
+        type: "tuple",
+        components: [
+          { name: "id", type: "uint256" },
+          { name: "asset", type: "address" },
+          { name: "holder", type: "address" },
+          { name: "amount", type: "uint256" },
+          { name: "destination", type: "address" },
+          { name: "triggerType", type: "uint8" },
+          { name: "sourceEventHash", type: "bytes32" },
+          { name: "complianceHash", type: "bytes32" },
+          { name: "instructionHash", type: "bytes32" },
+          { name: "settlementRef", type: "bytes32" },
+          { name: "triggerBlock", type: "uint64" },
+          { name: "requestedAt", type: "uint64" },
+          { name: "settledAt", type: "uint64" },
+          { name: "status", type: "uint8" },
+        ],
+      },
+    ],
+  },
+  {
+    type: "function",
+    name: "holderRedemptions",
+    stateMutability: "view",
+    inputs: [{ name: "holder", type: "address" }],
+    outputs: [{ type: "uint256[]" }],
+  },
+  {
+    type: "function",
+    name: "assetRedemptions",
+    stateMutability: "view",
+    inputs: [{ name: "asset", type: "address" }],
+    outputs: [{ type: "uint256[]" }],
+  },
+  { type: "function", name: "redemptionCount", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "finalityDepthFor", stateMutability: "view", inputs: [{ name: "asset", type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "finalityDeadlineBlock", stateMutability: "view", inputs: [{ name: "id", type: "uint256" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "confirmFinality", stateMutability: "nonpayable", inputs: [{ name: "id", type: "uint256" }], outputs: [] },
+  {
+    type: "event",
+    name: "RedemptionTriggered",
+    inputs: [
+      { name: "id", type: "uint256", indexed: true },
+      { name: "asset", type: "address", indexed: true },
+      { name: "holder", type: "address", indexed: true },
+      { name: "amount", type: "uint256" },
+      { name: "destination", type: "address" },
+      { name: "triggerType", type: "uint8" },
+      { name: "sourceEventHash", type: "bytes32" },
+    ],
+  },
+  {
+    type: "event",
+    name: "RedemptionRequested",
+    inputs: [
+      { name: "id", type: "uint256", indexed: true },
+      { name: "asset", type: "address", indexed: true },
+      { name: "holder", type: "address", indexed: true },
+      { name: "amount", type: "uint256" },
+      { name: "destination", type: "address" },
+      { name: "triggerType", type: "uint8" },
+    ],
+  },
+] as const satisfies Abi;
 
 export const tokenAbi = [
-  "function balanceOf(address) view returns (uint256)",
-  "function allowance(address owner, address spender) view returns (uint256)",
-  "function approve(address,uint256) returns (bool)",
-  "function symbol() view returns (string)",
-  "function decimals() view returns (uint8)"
-] as const;
+  { type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ name: "a", type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "allowance", stateMutability: "view", inputs: [{ name: "owner", type: "address" }, { name: "spender", type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "approve", stateMutability: "nonpayable", inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ type: "bool" }] },
+  { type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
+  { type: "function", name: "decimals", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
+] as const satisfies Abi;
 
 export const directBurnAbi = [
-  "function redeem(uint256 amount, address destination) returns (uint256)"
-] as const;
+  { type: "function", name: "redeem", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }, { name: "destination", type: "address" }], outputs: [{ type: "uint256" }] },
+] as const satisfies Abi;
 
 export const requestLockAbi = [
-  "function requestRedemption(uint256 amount, address destination) returns (uint256)",
-  "function finalizeRedemption(uint256 requestId) returns (uint256)",
-  "function cancelRequest(uint256 requestId)",
-  "function requests(uint256 requestId) view returns (address holder,uint256 amount,address destination,bool finalized,bool cancelled)",
-  "function nextRequestId() view returns (uint256)"
-] as const;
+  { type: "function", name: "requestRedemption", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }, { name: "destination", type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "finalizeRedemption", stateMutability: "nonpayable", inputs: [{ name: "requestId", type: "uint256" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "cancelRequest", stateMutability: "nonpayable", inputs: [{ name: "requestId", type: "uint256" }], outputs: [] },
+  {
+    type: "function",
+    name: "requests",
+    stateMutability: "view",
+    inputs: [{ name: "requestId", type: "uint256" }],
+    outputs: [
+      {
+        type: "tuple",
+        components: [
+          { name: "holder", type: "address" },
+          { name: "amount", type: "uint256" },
+          { name: "destination", type: "address" },
+          { name: "finalized", type: "bool" },
+          { name: "cancelled", type: "bool" },
+        ],
+      },
+    ],
+  },
+  { type: "function", name: "nextRequestId", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+] as const satisfies Abi;
 
 export const complianceAbi = [
-  "function runCheck(uint256 redemptionId) external"
-] as const;
+  { type: "function", name: "runCheck", stateMutability: "nonpayable", inputs: [{ name: "redemptionId", type: "uint256" }], outputs: [] },
+] as const satisfies Abi;
 
 export const signerAbi = [
-  "function getInstruction(uint256 id) view returns (tuple(bytes32 assetId,address holder,uint256 amount,address destination,uint8 triggerType,bytes32 sourceEventHash,bytes32 complianceHash,uint256 nonce,uint256 deadline), bytes32 digest)",
-  "function threshold() view returns (uint256)",
-  "function signerCount() view returns (uint256)",
-  "function signers(uint256 index) view returns (address)",
-  "function signatureCount(uint256 id) view returns (uint256)",
-  "function collectedSigners(uint256 id) view returns (address[])"
-] as const;
+  {
+    type: "function",
+    name: "getInstruction",
+    stateMutability: "view",
+    inputs: [{ name: "id", type: "uint256" }],
+    outputs: [
+      {
+        type: "tuple",
+        components: [
+          { name: "assetId", type: "bytes32" },
+          { name: "holder", type: "address" },
+          { name: "amount", type: "uint256" },
+          { name: "destination", type: "address" },
+          { name: "triggerType", type: "uint8" },
+          { name: "sourceEventHash", type: "bytes32" },
+          { name: "complianceHash", type: "bytes32" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      },
+      { name: "digest", type: "bytes32" },
+    ],
+  },
+  { type: "function", name: "threshold", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "signerCount", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "signers", stateMutability: "view", inputs: [{ name: "index", type: "uint256" }], outputs: [{ type: "address" }] },
+  { type: "function", name: "signatureCount", stateMutability: "view", inputs: [{ name: "id", type: "uint256" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "collectedSigners", stateMutability: "view", inputs: [{ name: "id", type: "uint256" }], outputs: [{ type: "address[]" }] },
+] as const satisfies Abi;
 
 export const breakerAbi = [
-  "function voteApprove(uint256 id) external",
-  "function voteReject(uint256 id) external",
-  "function votesFor(uint256 id) view returns (uint256 approves, uint256 rejects)",
-  "function paused() view returns (bool)",
-  "function boardSize() view returns (uint256)"
-] as const;
+  { type: "function", name: "voteApprove", stateMutability: "nonpayable", inputs: [{ name: "id", type: "uint256" }], outputs: [] },
+  { type: "function", name: "voteReject", stateMutability: "nonpayable", inputs: [{ name: "id", type: "uint256" }], outputs: [] },
+  { type: "function", name: "votesFor", stateMutability: "view", inputs: [{ name: "id", type: "uint256" }], outputs: [{ type: "uint256" }, { type: "uint256" }] },
+  { type: "function", name: "paused", stateMutability: "view", inputs: [], outputs: [{ type: "bool" }] },
+  { type: "function", name: "boardSize", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+] as const satisfies Abi;
 
 export const identityAbi = [
-  "function isVerified(address) view returns (bool)"
-] as const;
+  { type: "function", name: "isVerified", stateMutability: "view", inputs: [{ name: "a", type: "address" }], outputs: [{ type: "bool" }] },
+] as const satisfies Abi;
 
 // ------------------------------------------------------------------
 // Helpers
