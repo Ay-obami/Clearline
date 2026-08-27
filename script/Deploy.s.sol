@@ -27,6 +27,20 @@ contract ClearlineDeploy is Script {
         uint256 key = vm.envUint("DEPLOYER_KEY");
         address deployer = vm.addr(key);
 
+        // Production guardrail: mainnet broadcasts must be intentional.
+        // HSK Chain mainnet chainId = 177 (ethereum-lists registry).
+        if (block.chainid == 177 && !vm.envOr("CONFIRM_MAINNET", false)) {
+            revert("MAINNET GUARD: re-run with CONFIRM_MAINNET=true to broadcast");
+        }
+
+        // Tunables (defaults match the hackathon demo topology; override via env):
+        uint256 signerCount = vm.envOr("SIGNER_COUNT", uint256(3));
+        uint256 signerThreshold = vm.envOr("SIGNER_THRESHOLD", uint256(2));
+        require(signerThreshold <= signerCount && signerCount <= 10, "bad signer config");
+        uint256 boardCount = vm.envOr("BOARD_COUNT", uint256(2));
+        uint256 boardThreshold = vm.envOr("BOARD_THRESHOLD", uint256(2));
+        require(boardThreshold <= boardCount && boardCount > 0, "bad board config");
+
         vm.startBroadcast(key);
 
         // 1. Identity registry
@@ -64,22 +78,31 @@ contract ClearlineDeploy is Script {
         registry.setInstructionSigner(address(signer));
         registry.setSettlementRecorder(address(settlement));
 
-        address[] memory sigs = _readList("SIGNER_ADDRS", deployer, 3);
+        // FR5: optional explicit finality depth (12–20 recommended; defaults
+        // live inside RedemptionRegistry). Applies chain-wide unless per-asset
+        // overrides are set afterwards via setAssetFinalityDepth().
+        uint256 finalityDepth = vm.envOr("FINALITY_DEPTH", uint256(0));
+        if (finalityDepth > 0) {
+            registry.setDefaultFinalityDepth(finalityDepth);
+            registry.setAssetFinalityDepth(address(token), finalityDepth);
+        }
+
+        address[] memory sigs = _readList("SIGNER_ADDRS", deployer, signerCount);
         if (!_envExists("SIGNER_ADDRS")) {
             uint256 first = _deriveFrom(deployer);
             sigs[0] = vm.addr(first);
             sigs[1] = vm.addr(first + 1);
-            sigs[2] = vm.addr(first + 2);
+            if (signerCount >= 3) sigs[2] = vm.addr(first + 2);
         }
-        signer.setSigners(sigs, 2);
+        signer.setSigners(sigs, signerThreshold);
 
-        address[] memory board = _readList("BOARD_ADDRS", deployer, 2);
+        address[] memory board = _readList("BOARD_ADDRS", deployer, boardCount);
         if (!_envExists("BOARD_ADDRS")) {
             uint256 b0 = _deriveFrom(deployer) + 100;
             board[0] = vm.addr(b0);
-            board[1] = vm.addr(b0 + 1);
+            if (boardCount >= 2) board[1] = vm.addr(b0 + 1);
         }
-        breaker.setBoard(board, 2);
+        breaker.setBoard(board, boardThreshold);
 
         address attestor = vm.envOr("ATTESTOR_ADDR", deployer);
         settlement.setAttestor(attestor, true);
@@ -95,7 +118,7 @@ contract ClearlineDeploy is Script {
 
         vm.stopBroadcast();
 
-        console2.log("=== Clearline deployment complete ===");
+        console2.log("=== Clearline deployment complete (chainId=%d) ===", block.chainid);
         console2.log("TOKEN_ADDRESS=%s", address(token));
         console2.log("REGISTRY_ADDRESS=%s", address(registry));
         console2.log("IDENTITY_ADDRESS=%s", address(identity));
@@ -105,6 +128,11 @@ contract ClearlineDeploy is Script {
         console2.log("SIGNER_ADDRESS=%s", address(signer));
         console2.log("BREAKER_ADDRESS=%s", address(breaker));
         console2.log("SETTLEMENT_ADDRESS=%s", address(settlement));
+        console2.log("SIGNERS_%d_THRESHOLD_%d", signerCount, signerThreshold);
+        console2.log("BOARD_%d_THRESHOLD_%d", boardCount, boardThreshold);
+        console2.log("ATTESTOR_ADDR=%s", attestor);
+        console2.log("HOLDER_ADDR=%s", holder);
+        if (finalityDepth > 0) console2.log("FINALITY_DEPTH=%d", finalityDepth);
     }
 
     /// @dev env comma-list -> address[]; unset/garbage entries padded with `fallback_`.
