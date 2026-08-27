@@ -141,6 +141,33 @@ Import the holder key into MetaMask (add network `http://127.0.0.1:8545`, chainI
 open the dashboard, and you'll see redemptions #1 and #2 with their full audit trails.
 
 
+## Deployment status — HSK Chain Testnet (chainId 133)
+
+Deployed & verified on the public testnet, 2026-08-27. All contracts verified on
+Blockscout (`testnet-explorer.hskchain.net`):
+
+| Contract | Address |
+| --- | --- |
+| RedemptionRegistry | `0x2E9a0a2217B7A7c1524eeF6b4599B40AE5F891E8` |
+| MockRWAToken | `0x095b47575fd7fB67dab8773fB8E01C94b0A24884` |
+| MockIdentityRegistry | `0x235D438A068B75DbFC404308494ee4Fbde56852E` |
+| DirectBurnAdapter | `0xCe3fA8660EFc7ec4d9d4373ed23FA26741032a21` |
+| RequestLockAdapter | `0x2Fad67f598EC08ec3D48143baC28638D4eDE09FD` |
+| ComplianceRecheck | `0x6A97b1913Bca9d17A57cAae1F6b5C1885bE1DAA1` |
+| InstructionSigner | `0x25be872a3791a159A598C1539b0BCb22e5FCaC16` |
+| CircuitBreaker | `0x8D40f9D47886f21223357874e1a99a22DD4f9E5e` |
+| SettlementRecorder | `0x4CdF78C7830FE120d0c2Be8123e8AE4DEe6402bA` |
+
+Config: signer threshold **2-of-3**, board **2-of-2**, finality depth **12 blocks**.
+Redemption #1 completed the full lifecycle on-chain (trigger → finality → compliance
+→ 2 EIP-712 signatures → settlement) with real signer + custodian processes against
+the live RPC. Role keys live in gitignored `deployments/testnet.roles.env` — back
+these up offline.
+
+Deploying again: `DEPLOYER_KEY=… ./scripts/gen-role-wallets.sh testnet && FUNDING_KEY=… ./scripts/fund-roles.sh testnet && SIGNER_ADDRS=… BOARD_ADDRS=… ATTESTOR_ADDR=… HOLDER=… MINT_AMOUNT=25000ether DEPLOYER_KEY=… forge script script/Deploy.s.sol:ClearlineDeploy --rpc-url hsk_testnet --broadcast`
+
+
+
 ## Demo-day checklist (PRD §9.9)
 
 1. Pre-fund deployer, custodian relayer, and all signer wallets with testnet HSK.
