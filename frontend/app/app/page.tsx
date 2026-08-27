@@ -2,8 +2,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
-import { parseUnits } from "viem";
 import { useReadContract } from "wagmi";
+import { useQueryClient } from "@tanstack/react-query";
+import { parseUnits } from "viem";
 import {
   tokenAbi,
   directBurnAbi,
@@ -13,6 +14,7 @@ import {
 import { useTokenMeta } from "@/lib/useToken";
 import { useRedemptions } from "@/lib/useRedemptions";
 import { useTx } from "@/lib/useTx";
+import { fmtAmount } from "@/lib/format";
 
 const TOKEN = config.token as `0x${string}`;
 const DIRECT_BURN = config.directBurn as `0x${string}`;
@@ -106,12 +108,20 @@ function BalanceCard({ balanceRaw, readError }: { balanceRaw?: bigint; readError
 
 function DirectBurnCard() {
   const { address } = useAccount();
+  const queryClient = useQueryClient();
   const { symbol, decimals } = useTokenMeta();
   const tx = useTx();
   const txApprove = useTx();
   const [amount, setAmount] = useState("");
   const [destination, setDestination] = useState("");
   const [doneId, setDoneId] = useState<number | null>(null);
+  const [forceApprove, setForceApprove] = useState(false);
+
+  // If the burn pre-check reports insufficient allowance, flip the card back
+  // to Step 1 instead of leaving the user staring at a dead "Step 2" button.
+  useEffect(() => {
+    if (tx.error && /insufficient allowance/i.test(tx.error)) setForceApprove(true);
+  }, [tx.error]);
 
   const countQ = useReadContract({
     address: config.registry as `0x${string}`,
@@ -138,15 +148,20 @@ function DirectBurnCard() {
     abi: tokenAbi,
     functionName: "allowance",
     args: [(address ?? "0x0000000000000000000000000000000000000000") as `0x${string}`, DIRECT_BURN],
-    query: { enabled: !!address && parsed !== undefined },
+    query: {
+      enabled: !!address && parsed !== undefined,
+      refetchInterval: 2000,
+      refetchOnWindowFocus: true,
+    },
   });
 
   const valid = parsed !== undefined && destination.startsWith("0x") && destination.length === 42;
   const needsAllowance =
     valid && (allowanceQ.data === undefined || BigInt(allowanceQ.data as bigint) < parsed!);
+  const showApprove = valid && (needsAllowance || forceApprove);
 
   const submit = async () => {
-    if (!valid || needsAllowance) return;
+    if (!valid || showApprove) return;
     const ok = await tx.run(
       DIRECT_BURN,
       directBurnAbi,
@@ -158,6 +173,20 @@ function DirectBurnCard() {
       setDoneId(c + 1); // this burn becomes the next redemption id
       setAmount("");
       setDestination("");
+    }
+  };
+
+  const approve = async () => {
+    if (!valid) return;
+    const ok = await txApprove.run(TOKEN, tokenAbi, "approve", [DIRECT_BURN, parsed!]);
+    if (ok) {
+      setForceApprove(false);
+      // Refresh the allowance read immediately so Step 2 appears with fresh data.
+      queryClient.invalidateQueries({
+        predicate: (q) =>
+          String(q.queryKey[0]) === "readContract" &&
+          (q.queryKey[1] as { functionName?: string } | undefined)?.functionName === "allowance",
+      });
     }
   };
 
@@ -178,20 +207,23 @@ function DirectBurnCard() {
       ) : (
         <>
           <AmountDestFields amount={amount} setAmount={setAmount} destination={destination} setDestination={setDestination} symbol={symbol} />
-          {needsAllowance ? (
+          {showApprove ? (
             <button
               className="btn-secondary mt-4 w-full py-2 text-[13px]"
               disabled={!valid || txApprove.pending}
-              onClick={() =>
-                void txApprove.run(TOKEN, tokenAbi, "approve", [DIRECT_BURN, parsed!])
-              }
+              onClick={() => void approve()}
             >
               {txApprove.pending ? "Approving…" : `Step 1 — approve ${symbol} spend`}
             </button>
           ) : (
             <button className="btn-primary mt-4 w-full py-2 text-[13px]" onClick={() => void submit()} disabled={!valid || tx.pending}>
-              {needsAllowance ? "Waiting for approval…" : tx.pending ? "Submitting…" : "Step 2 — burn & trigger redemption"}
+              {tx.pending ? "Submitting…" : "Step 2 — burn & trigger redemption"}
             </button>
+          )}
+          {address && allowanceQ.data !== undefined && (
+            <p className="mt-2 font-mono text-[11px] text-mute">
+              adapter allowance: {fmtAmount(String(allowanceQ.data), decimals)} {symbol}
+            </p>
           )}
         </>
       )}

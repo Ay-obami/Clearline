@@ -1,10 +1,70 @@
 "use client";
 import { useState } from "react";
-import { useWriteContract, usePublicClient } from "wagmi";
-import type { Abi } from "viem";
+import { useAccount, useWriteContract, usePublicClient } from "wagmi";
+import { decodeErrorResult, type Abi } from "viem";
 
-/** Pull the first human-readable line out of viem/wagmi error objects. */
-export function errText(e: unknown): string {
+/** Walk the viem/wagmi error cause chain for the raw revert bytes. */
+function deepRevertData(e: unknown): string | undefined {
+  let cur = e as (Record<string, unknown> & { cause?: unknown }) | null;
+  const seen = new Set<object>();
+  while (cur && typeof cur === "object" && !seen.has(cur)) {
+    seen.add(cur);
+    for (const k of ["raw", "data"]) {
+      const v = cur[k];
+      if (typeof v === "string" && v.startsWith("0x") && v.length > 10) return v;
+    }
+    cur = cur.cause as typeof cur | null;
+  }
+  return undefined;
+}
+
+/** Format a wei bigint as a decimal token amount (e.g. 9 → "9"). */
+function fmtWei(v: unknown, decimals = 18): string {
+  try {
+    const n = typeof v === "bigint" ? v : BigInt(String(v ?? 0));
+    const neg = n < 0n;
+    const abs = neg ? -n : n;
+    const s = abs.toString().padStart(decimals + 1, "0");
+    const whole = s.slice(0, -decimals) || "0";
+    const frac = s.slice(-decimals).replace(/0+$/, "");
+    return `${neg ? "-" : ""}${Number(whole).toLocaleString("en-US")}${frac ? "." + frac : ""}`;
+  } catch {
+    return String(v);
+  }
+}
+
+/**
+ * Decode a viem/wagmi error into an actionable message, e.g.
+ * "Insufficient allowance — approve 29 first (current allowance 9)".
+ * Returns undefined when the error can't be decoded against `abi`.
+ */
+export function revertReason(e: unknown, abi: Abi, decimals = 18): string | undefined {
+  const data = deepRevertData(e);
+  if (!data) return undefined;
+  try {
+    const d = decodeErrorResult({ abi, data: data as `0x${string}` });
+    const args = (d.args ?? []) as unknown[];
+    if (d.errorName === "InsufficientAllowance" && args.length >= 2) {
+      return `Insufficient allowance — approve ${fmtWei(args[1], decimals)} first (current allowance ${fmtWei(args[0], decimals)})`;
+    }
+    if (d.errorName === "InsufficientBalance" && args.length >= 2) {
+      return `Insufficient balance — have ${fmtWei(args[0], decimals)}, need ${fmtWei(args[1], decimals)}`;
+    }
+    const pretty = args
+      .map((a) => (typeof a === "bigint" ? a.toString() : String(a)))
+      .join(", ");
+    return pretty ? `${d.errorName}(${pretty})` : d.errorName;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Pull the best human-readable line out of viem/wagmi error objects. */
+export function errText(e: unknown, abi?: Abi, decimals = 18): string {
+  if (abi) {
+    const r = revertReason(e, abi, decimals);
+    if (r) return r;
+  }
   const m = e as { shortMessage?: string; reason?: string; message?: string };
   return (
     (m?.shortMessage || m?.reason || m?.message || "Transaction failed")
@@ -24,10 +84,15 @@ export function errText(e: unknown): string {
  * true when the tx actually succeeded. This is what prevents the false
  * "Triggered" success note when a burn reverted or no-op'd on-chain.
  *
+ * CRITICAL: the pre-simulation must run AS THE CONNECTED ACCOUNT — an eth_call
+ * without `from` executes as 0x0…0, so every allowance/balance gate reverts
+ * even when the real sender would succeed.
+ *
  * ABIs must already be JSON-parsed objects (parseAbi) — viem 2.55+ rejects
  * human-readable strings on the write path (`'name' in item` throws).
  */
 export function useTx() {
+  const { address: account } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const pc = usePublicClient();
   const [pending, setPending] = useState(false);
@@ -48,17 +113,18 @@ export function useTx() {
     try {
       // Pre-flight: catch revert reasons (insufficient allowance/balance,
       // not verified, paused, etc.) before the user pays gas.
-      if (pc) {
+      if (pc && account) {
         try {
           await pc.simulateContract({
             address: address as `0x${string}`,
             abi,
             functionName,
             args,
+            account,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
           } as any);
         } catch (e) {
-          setError(errText(e));
+          setError(errText(e, abi));
           return false;
         }
       }
@@ -89,7 +155,7 @@ export function useTx() {
       setLastHash(hash);
       return true;
     } catch (e) {
-      setError(errText(e));
+      setError(errText(e, abi));
       return false;
     } finally {
       setPending(false);

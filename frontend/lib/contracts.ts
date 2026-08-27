@@ -148,6 +148,15 @@ export const registryAbi = [
       { name: "triggerType", type: "uint8" },
     ],
   },
+  // RedemptionRegistry / IRedemptionTypes custom errors.
+  { type: "error", name: "ZeroAddress", inputs: [] },
+  { type: "error", name: "NotAuthorized", inputs: [] },
+  { type: "error", name: "ZeroAmount", inputs: [] },
+  { type: "error", name: "InvalidStatus", inputs: [{ name: "current", type: "uint8" }] },
+  { type: "error", name: "UnknownRedemption", inputs: [{ name: "redemptionId", type: "uint256" }] },
+  { type: "error", name: "DuplicateSourceEvent", inputs: [{ name: "sourceEventHash", type: "bytes32" }] },
+  { type: "error", name: "AssetNotRegistered", inputs: [{ name: "asset", type: "address" }] },
+  { type: "error", name: "FinalityNotReached", inputs: [{ name: "redemptionId", type: "uint256" }, { name: "currentBlock", type: "uint256" }, { name: "requiredBlock", type: "uint256" }] },
 ] as const satisfies Abi;
 
 export const tokenAbi = [
@@ -156,10 +165,18 @@ export const tokenAbi = [
   { type: "function", name: "approve", stateMutability: "nonpayable", inputs: [{ name: "spender", type: "address" }, { name: "amount", type: "uint256" }], outputs: [{ type: "bool" }] },
   { type: "function", name: "symbol", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
   { type: "function", name: "decimals", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
+  // MockRWAToken custom errors — lets decodeErrorResult name a revert.
+  { type: "error", name: "NotAuthorized", inputs: [] },
+  { type: "error", name: "ZeroAddress", inputs: [] },
+  { type: "error", name: "InsufficientBalance", inputs: [{ name: "available", type: "uint256" }, { name: "required", type: "uint256" }] },
+  { type: "error", name: "TransferNotAllowed", inputs: [{ name: "from", type: "address" }, { name: "to", type: "address" }] },
+  { type: "error", name: "AmountExceedsAllowance", inputs: [] },
 ] as const satisfies Abi;
 
 export const directBurnAbi = [
   { type: "function", name: "redeem", stateMutability: "nonpayable", inputs: [{ name: "amount", type: "uint256" }, { name: "destination", type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "error", name: "InsufficientAllowance", inputs: [{ name: "allowance_", type: "uint256" }, { name: "amount", type: "uint256" }] },
+  { type: "error", name: "ZeroAmount", inputs: [] },
 ] as const satisfies Abi;
 
 export const requestLockAbi = [
@@ -185,10 +202,17 @@ export const requestLockAbi = [
     ],
   },
   { type: "function", name: "nextRequestId", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "error", name: "NotRequestHolder", inputs: [] },
+  { type: "error", name: "RequestNotOpen", inputs: [] },
+  { type: "error", name: "ZeroAmount", inputs: [] },
 ] as const satisfies Abi;
 
 export const complianceAbi = [
   { type: "function", name: "runCheck", stateMutability: "nonpayable", inputs: [{ name: "redemptionId", type: "uint256" }], outputs: [] },
+  { type: "error", name: "NotAuthorized", inputs: [] },
+  { type: "error", name: "ZeroAddress", inputs: [] },
+  { type: "error", name: "IdentityNotConfigured", inputs: [] },
+  { type: "error", name: "InvalidStatus", inputs: [{ name: "current", type: "uint8" }] },
 ] as const satisfies Abi;
 
 export const signerAbi = [
