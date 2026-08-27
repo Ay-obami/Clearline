@@ -168,6 +168,27 @@ Deploying again: `DEPLOYER_KEY=… ./scripts/gen-role-wallets.sh testnet && FUND
 
 
 
+## Frontend deployment — Vercel
+
+| Project | URL | Status |
+| --- | --- | --- |
+| clearline-testnet | https://clearline-testnet.vercel.app | **Live** (production deploy) |
+| clearline-mainnet | created, env-configured (chain 177) | **Unpublished** — deploy only at GO |
+
+Testnet app points at the live HSK testnet contracts above; the header shows the
+Testnet pill. Mainnet env (chainId 177, mainnet RPC/explorer) is set on the project
+but nothing is deployed until contract addresses exist and `CONFIRM_MAINNET=true`
+is set in the deploy step.
+
+## Services — Railway (project `clearline-testnet`)
+
+Four services, all Online, deploy root `services/` with `SERVICE_ROLE` dispatch:
+
+- signer-1 / signer-2 / signer-3 — 2-of-3 InstructionSigner set (live, watch testnet)
+- custodian — settlement attestor relayer (live, posts confirmations)
+
+Redeploy a service: `cd services && railway up --service <name> --project 75f71718-33b7-4cc9-b124-bf8b0371f4e1 --environment 63fca4dc-8734-439d-9c76-8bd51cf1d070 --detach --yes`
+
 ## Demo-day checklist (PRD §9.9)
 
 1. Pre-fund deployer, custodian relayer, and all signer wallets with testnet HSK.
