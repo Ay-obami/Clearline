@@ -8,26 +8,62 @@
  */
 import type { Abi } from "viem";
 
+/**
+ * Env-provided values can arrive with stray characters (a literal trailing
+ * `\n` made every Vercel-deployed address 44 chars long and viem rejected
+ * them all as "invalid address"). Normalize to a strict 40-hex address or
+ * fall back loudly.
+ */
+function addrFromEnv(v: string | undefined, fallback: string, name: string): string {
+  const cleaned = (v || "").replace(/[\s\\]/g, "");
+  if (cleaned && !/^0x[0-9a-fA-F]{40}$/.test(cleaned)) {
+    console.warn(
+      `[contracts] ${name} is not a valid 40-hex address ("${v}") — using fallback. ` +
+        `Fix the environment value.`
+    );
+    return fallback;
+  }
+  return cleaned || fallback;
+}
+
+/** Same normalizer for non-address strings (URLs, labels). */
+function strFromEnv(v: string | undefined, fallback: string): string {
+  const cleaned = (v || "").replace(/[\r\n\\]/g, "").trim();
+  return cleaned || fallback;
+}
+
 export const config = {
   // Network identity comes entirely from env so the SAME build serves
   // testnet (Vercel project A) or mainnet (project B) — never hardcode here.
-  chainId: Number(process.env.NEXT_PUBLIC_CHAIN_ID || 133),
-  rpcUrl: process.env.NEXT_PUBLIC_RPC_URL || "https://testnet.hsk.xyz",
-  explorer: process.env.NEXT_PUBLIC_EXPLORER || "https://testnet-explorer.hskchain.net/",
-  chainName: process.env.NEXT_PUBLIC_CHAIN_NAME || "HSK Chain Testnet",
-  environment: process.env.NEXT_PUBLIC_ENVIRONMENT || "testnet", // "testnet" | "mainnet"
+  chainId: Number(strFromEnv(process.env.NEXT_PUBLIC_CHAIN_ID, "133")),
+  rpcUrl: strFromEnv(process.env.NEXT_PUBLIC_RPC_URL, "https://testnet.hsk.xyz"),
+  explorer: strFromEnv(process.env.NEXT_PUBLIC_EXPLORER, "https://testnet-explorer.hskchain.net/"),
+  chainName: strFromEnv(process.env.NEXT_PUBLIC_CHAIN_NAME, "HSK Chain Testnet"),
+  environment: strFromEnv(process.env.NEXT_PUBLIC_ENVIRONMENT, "testnet"), // "testnet" | "mainnet"
 
   // Addresses are surfaced after deployment; the values below are foundry
   // anvil-derived placeholders so the UI runs from a clean checkout.
-  token: process.env.NEXT_PUBLIC_TOKEN || "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-  registry: process.env.NEXT_PUBLIC_REGISTRY || "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
-  identity: process.env.NEXT_PUBLIC_IDENTITY || "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-  directBurn: process.env.NEXT_PUBLIC_DIRECT_BURN || "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
-  requestLock: process.env.NEXT_PUBLIC_REQUEST_LOCK || "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
-  compliance: process.env.NEXT_PUBLIC_COMPLIANCE || "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318",
-  signer: process.env.NEXT_PUBLIC_SIGNER || "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e",
-  breaker: process.env.NEXT_PUBLIC_BREAKER || "0x610178dA211FEF7D417bC0e6FeD39F05609AD788",
-  settlement: process.env.NEXT_PUBLIC_SETTLEMENT || "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0",
+  token: addrFromEnv(process.env.NEXT_PUBLIC_TOKEN, "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512", "NEXT_PUBLIC_TOKEN"),
+  registry: addrFromEnv(process.env.NEXT_PUBLIC_REGISTRY, "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9", "NEXT_PUBLIC_REGISTRY"),
+  identity: addrFromEnv(process.env.NEXT_PUBLIC_IDENTITY, "0x5FbDB2315678afecb367f032d93F642f64180aa3", "NEXT_PUBLIC_IDENTITY"),
+  // The deploy scripts and env files historically used the `_ADAPTER` suffix
+  // (e.g. NEXT_PUBLIC_DIRECT_BURN_ADAPTER); older builds referenced the
+  // bare names. Accept both so no environment silently falls back to the
+  // anvil placeholder below.
+  directBurn: addrFromEnv(
+    process.env.NEXT_PUBLIC_DIRECT_BURN_ADAPTER || process.env.NEXT_PUBLIC_DIRECT_BURN,
+    "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+    "NEXT_PUBLIC_DIRECT_BURN(_ADAPTER)"
+  ),
+  requestLock: addrFromEnv(
+    process.env.NEXT_PUBLIC_REQUEST_LOCK_ADAPTER || process.env.NEXT_PUBLIC_REQUEST_LOCK,
+    "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
+    "NEXT_PUBLIC_REQUEST_LOCK(_ADAPTER)"
+  ),
+  compliance: addrFromEnv(process.env.NEXT_PUBLIC_COMPLIANCE, "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318", "NEXT_PUBLIC_COMPLIANCE"),
+  signer: addrFromEnv(process.env.NEXT_PUBLIC_SIGNER, "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e", "NEXT_PUBLIC_SIGNER"),
+  breaker: addrFromEnv(process.env.NEXT_PUBLIC_BREAKER, "0x610178dA211FEF7D417bC0e6FeD39F05609AD788", "NEXT_PUBLIC_BREAKER"),
+  settlement: addrFromEnv(process.env.NEXT_PUBLIC_SETTLEMENT, "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0", "NEXT_PUBLIC_SETTLEMENT"),
 } as const;
 
 // ------------------------------------------------------------------

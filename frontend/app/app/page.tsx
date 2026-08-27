@@ -81,7 +81,7 @@ function AmountDestFields({
   );
 }
 
-function BalanceCard({ balanceRaw }: { balanceRaw?: bigint }) {
+function BalanceCard({ balanceRaw, readError }: { balanceRaw?: bigint; readError?: Error | null }) {
   const { symbol } = useTokenMeta();
   return (
     <div className="card flex items-baseline justify-between p-5">
@@ -91,6 +91,13 @@ function BalanceCard({ balanceRaw }: { balanceRaw?: bigint }) {
           {balanceRaw === undefined ? "—" : (Number(balanceRaw) / 1e18).toLocaleString("en-US", { maximumFractionDigits: 4 })}{" "}
           <span className="text-sm font-normal text-body">{symbol}</span>
         </p>
+        {readError && (
+          <p className="mt-1 max-w-md text-[11px] leading-relaxed text-flag">
+            Balance read failed (
+            {(readError as { shortMessage?: string }).shortMessage || readError.message}). Confirm your
+            wallet is connected to the <span className="font-medium">{config.chainName}</span> network.
+          </p>
+        )}
       </div>
       <p className="font-mono text-[11px] text-mute">{config.explorer}token/{TOKEN}</p>
     </div>
@@ -98,8 +105,10 @@ function BalanceCard({ balanceRaw }: { balanceRaw?: bigint }) {
 }
 
 function DirectBurnCard() {
+  const { address } = useAccount();
   const { symbol, decimals } = useTokenMeta();
   const tx = useTx();
+  const txApprove = useTx();
   const [amount, setAmount] = useState("");
   const [destination, setDestination] = useState("");
   const [doneId, setDoneId] = useState<number | null>(null);
@@ -113,14 +122,36 @@ function DirectBurnCard() {
     query: { enabled: doneId === null },
   });
 
-  const valid = amount !== "" && Number(amount) > 0 && destination.startsWith("0x") && destination.length === 42;
+  const parsed = (() => {
+    try {
+      return amount !== "" && Number(amount) > 0 ? parseUnits(amount as `${number}`, decimals) : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+
+  // MockRWAToken burns via allowance — DirectBurnAdapter redeems on the
+  // holder's behalf, so the adapter needs an approve before redeem() can
+  // spend tokens (the testnet redeems all follow approve -> redeem).
+  const allowanceQ = useReadContract({
+    address: TOKEN,
+    abi: tokenAbi,
+    functionName: "allowance",
+    args: [(address ?? "0x0000000000000000000000000000000000000000") as `0x${string}`, DIRECT_BURN],
+    query: { enabled: !!address && parsed !== undefined },
+  });
+
+  const valid = parsed !== undefined && destination.startsWith("0x") && destination.length === 42;
+  const needsAllowance =
+    valid && (allowanceQ.data === undefined || BigInt(allowanceQ.data as bigint) < parsed!);
+
   const submit = async () => {
-    if (!valid) return;
+    if (!valid || needsAllowance) return;
     const ok = await tx.run(
       DIRECT_BURN,
       directBurnAbi,
       "redeem",
-      [parseUnits(amount as `${number}`, decimals), destination]
+      [parsed!, destination]
     );
     if (ok) {
       const c = Number(countQ.data ?? 0);
@@ -147,12 +178,26 @@ function DirectBurnCard() {
       ) : (
         <>
           <AmountDestFields amount={amount} setAmount={setAmount} destination={destination} setDestination={setDestination} symbol={symbol} />
-          <button className="btn-primary mt-4 w-full py-2 text-[13px]" onClick={() => void submit()} disabled={!valid || tx.pending}>
-            {tx.pending ? "Submitting…" : "Burn & trigger redemption"}
-          </button>
+          {needsAllowance ? (
+            <button
+              className="btn-secondary mt-4 w-full py-2 text-[13px]"
+              disabled={!valid || txApprove.pending}
+              onClick={() =>
+                void txApprove.run(TOKEN, tokenAbi, "approve", [DIRECT_BURN, parsed!])
+              }
+            >
+              {txApprove.pending ? "Approving…" : `Step 1 — approve ${symbol} spend`}
+            </button>
+          ) : (
+            <button className="btn-primary mt-4 w-full py-2 text-[13px]" onClick={() => void submit()} disabled={!valid || tx.pending}>
+              {needsAllowance ? "Waiting for approval…" : tx.pending ? "Submitting…" : "Step 2 — burn & trigger redemption"}
+            </button>
+          )}
         </>
       )}
-      {tx.error && <p className="mt-3 text-xs text-flag">{tx.error}</p>}
+      {(txApprove.error || tx.error) && (
+        <p className="mt-3 text-xs text-flag">{txApprove.error ?? tx.error}</p>
+      )}
     </div>
   );
 }
@@ -281,9 +326,11 @@ function RequestRow({ id }: { id: number }) {
     functionName: "requests",
     args: [BigInt(id)],
   });
-  const d = q.data as unknown[] | undefined;
-  const cancelled = d?.[4] === true;
-  const finalized = d?.[3] === true;
+  const d = q.data as unknown[] | Record<string, unknown> | undefined;
+  // viem returns named structs as objects; bare tuples as arrays — handle both.
+  const at = (i: number, name: string) => (Array.isArray(d) ? d[i] : d?.[name]);
+  const cancelled = at(4, "cancelled") === true;
+  const finalized = at(3, "finalized") === true;
   const state = finalized ? "finalized" : cancelled ? "cancelled" : "locked";
   return (
     <li className="flex items-center justify-between rounded-[8px] border border-line px-3 py-2">
@@ -340,7 +387,7 @@ export default function InitiatePage() {
     abi: tokenAbi,
     functionName: "balanceOf",
     args: [(address ?? ZERO_ADDR) as `0x${string}`],
-    query: { enabled: !!address },
+    query: { enabled: !!address, retry: 3, retryDelay: 1000 },
   });
 
   if (!mounted) return null;
@@ -360,7 +407,7 @@ export default function InitiatePage() {
         <WalletPrompt />
       ) : (
         <>
-          <BalanceCard balanceRaw={balanceQ.data as bigint | undefined} />
+          <BalanceCard balanceRaw={balanceQ.data as bigint | undefined} readError={balanceQ.error as Error | null} />
           <div className="grid gap-5 md:grid-cols-2">
             <DirectBurnCard />
             <RequestLockCard />

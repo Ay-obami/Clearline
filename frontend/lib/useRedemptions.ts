@@ -22,25 +22,36 @@ export type Redemption = {
 
 const REG = config.registry as `0x${string}`;
 
-/** Decode a registry `getRedemption` struct tuple into typed client data. */
+/**
+ * Decode a registry `getRedemption` struct tuple into typed client data.
+ * viem returns named struct tuples as an OBJECT ({ id, asset, holder, ... })
+ * and only bare tuples as arrays — accept both shapes so this works across
+ * viem versions (2.55+ returns objects for named components).
+ */
 export function normalizeRedemption(d: unknown): Redemption | undefined {
-  if (!Array.isArray(d) || d.length < 14) return undefined;
+  if (!d || typeof d !== "object") return undefined;
+  const arr = Array.isArray(d) ? (d as unknown[]) : null;
+  const obj = d as Record<string, unknown>;
+  const at = (i: number, name: string): unknown =>
+    arr != null ? arr[i] : obj[name];
   try {
+    const id = at(0, "id");
+    if (id === undefined || id === null) return undefined;
     return {
-      id: Number(d[0]),
-      asset: String(d[1]),
-      holder: String(d[2]),
-      amount: BigInt(d[3]).toString(),
-      destination: String(d[4]),
-      triggerType: Number(d[5]),
-      sourceEventHash: String(d[6]),
-      complianceHash: String(d[7]),
-      instructionHash: String(d[8]),
-      settlementRef: String(d[9]),
-      triggerBlock: Number(d[10]),
-      requestedAt: Number(d[11]),
-      settledAt: Number(d[12]),
-      status: Number(d[13]),
+      id: Number(id),
+      asset: String(at(1, "asset")),
+      holder: String(at(2, "holder")),
+      amount: BigInt(at(3, "amount") as bigint).toString(),
+      destination: String(at(4, "destination")),
+      triggerType: Number(at(5, "triggerType")),
+      sourceEventHash: String(at(6, "sourceEventHash")),
+      complianceHash: String(at(7, "complianceHash")),
+      instructionHash: String(at(8, "instructionHash")),
+      settlementRef: String(at(9, "settlementRef")),
+      triggerBlock: Number(at(10, "triggerBlock")),
+      requestedAt: Number(at(11, "requestedAt")),
+      settledAt: Number(at(12, "settledAt")),
+      status: Number(at(13, "status")),
     };
   } catch {
     return undefined;

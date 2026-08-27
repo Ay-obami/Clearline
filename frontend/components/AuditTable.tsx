@@ -11,6 +11,11 @@ import { useRedemptions } from "@/lib/useRedemptions";
 const TRIGGER_FILTERS = ["all", "directBurn", "requestLock"] as const;
 const STATUS_FILTERS = ["all", "awaiting", "requested", "flagged", "signed", "settled"] as const;
 
+const TRIGGER_MATCH: Record<string, number[]> = {
+  directBurn: [0], // TriggerType.Direct burn
+  requestLock: [1], // TriggerType.Request & lock
+};
+
 const STATUS_MATCH: Record<string, number[]> = {
   awaiting: [1],
   requested: [2],
@@ -57,7 +62,10 @@ export function AuditTable({ holderScope = false }: { holderScope?: boolean }) {
 
   const rows = useMemo(() => {
     let out = [...list];
-    if (triggerF !== "all") out = out.filter((r) => TriggerType[r.triggerType] === triggerF);
+    if (triggerF !== "all") {
+      const allowed = TRIGGER_MATCH[triggerF] ?? [];
+      out = out.filter((r) => allowed.includes(r.triggerType));
+    }
     if (statusF !== "all") {
       const allowed = STATUS_MATCH[statusF] ?? [];
       out = out.filter((r) => allowed.includes(r.status));
