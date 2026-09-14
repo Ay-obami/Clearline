@@ -1,24 +1,33 @@
 # Clearline
 
-**An on-chain redemption and custody-attestation layer for tokenized real-world assets.**
+**RWA redemption and custody-attestation infrastructure for tokenized real-world assets.**
 
-Tokenization solved issuance; redemption stayed in the back office. Clearline connects an on-chain token burn to the release of the underlying asset by running a verifiable, multi-step pipeline on-chain: it waits out block finality, re-checks the payout destination against an ERC-3643 identity registry at redemption time, collects a threshold EIP-712 multi-signature set on the release instruction, and records the custodian's settlement confirmation back on-chain — closing a fully queryable audit loop.
+Clearline connects an on-chain token redemption event to the off-chain release of the underlying asset through a verifiable, security-focused pipeline. It waits for finality, re-checks payout eligibility, collects threshold EIP-712 signatures, routes exceptions through manual review, and records settlement attestations back on-chain.
 
-Clearline is a *consumer* of ERC-3643 interfaces (identity registry, agent-scoped token `burn`). It does not replace the issuer, the identity registry, or the custody stack; it automates **initiation and attestation**, while the movement of the underlying asset continues to run on the custodian's rails.
+> **Burn on-chain. Verify compliance. Authorize release. Attest settlement.**
 
-## Features
+## Project snapshot
 
-- **Finality-aware pipeline** — every trigger is held in *Awaiting finality* until the configured confirmation depth (12 blocks by default) is reached; no downstream step is reachable before then.
-- **Multiple trigger paths, one pipeline** — on-demand direct burn and two-step request-and-lock converge on the same registry state machine, so downstream behavior is identical by design.
-- **Redemption-time compliance re-check** — the payout destination is validated against the ERC-3643 identity registry at redemption time; failures route to a manual-review queue instead of stalling the pipeline.
-- **Threshold multi-sig release instructions** — EIP-712 release instructions are signed by a configurable set of independent signer processes (2-of-3 by default), with nonce/deadline protection against replay.
-- **Circuit breaker with board override** — flagged or threshold-exceeded redemptions can be approved or rejected by a multi-sig board vote.
-- **Settlement attestation** — the custodian's confirmation is recorded on-chain with a full hash chain (source event → compliance → instruction → settlement), producing an immutable audit trail.
-- **Production guardrails** — mainnet broadcasts require an explicit `CONFIRM_MAINNET=true`; the deployment runner dry-runs and cost-checks the full transaction batch before broadcasting.
+- **Solidity + Foundry protocol architecture** for redemption lifecycle management
+- **ERC-3643-style compliance re-checks** at redemption time
+- **2-of-3 EIP-712 threshold signing** with nonce and deadline protection
+- **Circuit-breaker/manual-review path** with board approval/rejection
+- **Finality-aware execution** before downstream processing begins
+- **On-chain settlement attestation** with a traceable audit chain
+- **44 Foundry tests** with ~**90.6% line coverage** on core contracts
+- **Next.js frontend** plus independent Node.js signer/custodian services
+- **HSK testnet deployment** with Blockscout-verified contracts
+- **Mainnet deployment guardrails** including explicit confirmation and pre-broadcast cost checks
+
+## Why this exists
+
+Tokenization makes issuance programmable, but redemption often falls back to opaque back-office workflows. Clearline makes the redemption path observable and auditable without pretending the blockchain replaces the issuer, identity registry, or custodian.
+
+The system is a **consumer of ERC-3643 interfaces**. It automates redemption initiation, eligibility checks, release authorization, exception handling, and settlement attestation while the underlying asset still moves through the custodian's existing rails.
 
 ## Architecture
 
-```
+```text
                  Trigger adapters                      Shared on-chain pipeline
 ┌─────────────────────────────────┐  RedemptionTriggered  ┌─────────────────────────────────────────┐
 │ DirectBurnAdapter  (on-demand)  │ ─────────────────────▶ │ RedemptionRegistry                       │
@@ -28,101 +37,132 @@ Clearline is a *consumer* of ERC-3643 interfaces (identity registry, agent-scope
 └─────────────────────────────────┘                       ├─────────────────────────────────────────┤
                                                           │ InstructionSigner   → Signed (2-of-3)    │
                                 CircuitBreaker            ├─────────────────────────────────────────┤
-                                (board vote override)    │ SettlementRecorder → Settled (attested)  │
+                                (board vote override)     │ SettlementRecorder → Settled (attested) │
                                                           └─────────────────────────────────────────┘
 ```
 
 Every redemption is tagged by trigger type and traceable end-to-end via `RedemptionRegistry.getRedemption(id)`.
 
-## Components
+## Security model
+
+Clearline is designed around explicit authorization boundaries rather than a single privileged backend process.
+
+- **Finality before action** — downstream processing is unreachable until the configured block depth is satisfied.
+- **Redemption-time compliance** — payout eligibility is checked again when the redemption is processed.
+- **Threshold signing** — release instructions require the configured signer quorum; signatures use EIP-712 with nonce/deadline protection.
+- **Manual-review path** — flagged or threshold-exceeded redemptions require board action rather than silently bypassing policy.
+- **Settlement proof** — the custodian confirmation is recorded on-chain and linked to the redemption lifecycle.
+- **Mainnet safety** — chainId-177 broadcasts require `CONFIRM_MAINNET=true`; the deployment runner dry-runs and cost-checks the full batch first.
+- **Key hygiene** — role keys are generated locally and kept in gitignored deployment files.
+
+## Core components
 
 ### Smart contracts — `src/`
 
 | Contract | Responsibility |
 | --- | --- |
-| `RedemptionRegistry` | Pipeline state machine; configurable per-asset finality depth; emits the full lifecycle event set. |
-| `DirectBurnAdapter` | Holder-initiated, on-demand redemption: burns approved tokens and triggers the pipeline. |
-| `RequestLockAdapter` | Two-step lock → finalize flow with cancellation, for NAV-priced products. |
-| `ComplianceRecheck` | Per-redemption destination eligibility and sanctions re-check; permissionless keeper entry. |
-| `InstructionSigner` | EIP-712 `RedemptionInstruction` verification; threshold `ecrecover` with nonce/deadline protection. |
-| `CircuitBreaker` | Manual-review queue; board-vote approve/reject override. |
-| `SettlementRecorder` | Records custodian-signed settlement confirmations that close the lifecycle. |
-| `MockIdentityRegistry` / `MockRWAToken` | ERC-3643-flavored test fixtures for validation (see *Test fixtures*). |
+| `RedemptionRegistry` | Pipeline state machine, lifecycle storage, finality depth, lifecycle events |
+| `DirectBurnAdapter` | Holder-initiated redemption path that burns approved tokens and triggers the pipeline |
+| `RequestLockAdapter` | Two-step lock → finalize flow with cancellation for NAV-priced products |
+| `ComplianceRecheck` | Per-redemption payout eligibility and sanctions re-check |
+| `InstructionSigner` | EIP-712 threshold verification with nonce/deadline replay protection |
+| `CircuitBreaker` | Manual-review queue and board-vote approve/reject override |
+| `SettlementRecorder` | Custodian-signed settlement confirmation and lifecycle closure |
+| `MockIdentityRegistry` / `MockRWAToken` | ERC-3643-flavored test fixtures used for validation |
 
 ### Off-chain services — `services/`
 
-- **signer-1 / signer-2 / signer-3** — independent EIP-712 signing processes (one per key). They watch the registry for requested redemptions and submit signatures until the quorum is met.
-- **custodian** — settlement relayer: verifies the collected threshold signature set, then posts the settlement confirmation on-chain.
+- **signer-1 / signer-2 / signer-3** — independent EIP-712 signing processes
+- **custodian** — verifies the collected signature set and posts settlement confirmation on-chain
 
 ### Frontend — `frontend/`
 
-Next.js dashboard (Initiate, Status, Audit, System views) wired to live contract state: wallet-connected balance, a two-step direct-burn flow (approve → burn), per-redemption pipeline timelines, and the on-chain audit table. The same build serves testnet and mainnet — the target network and addresses come entirely from environment variables.
+Next.js dashboard with Initiate, Status, Audit, and System views. It supports wallet-connected balances, direct-burn flows, per-redemption timelines, and on-chain audit inspection. Network and contract configuration is entirely environment-driven.
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
-| `src/` | Smart contracts (registry, adapters, compliance, signer, breaker, recorder). |
-| `src/interfaces/` | `ITriggerAdapter`, `IRedemptionTypes`, `IIdentityRegistry`, etc. |
-| `src/mocks/` | ERC-3643-flavored test fixtures (identity registry, RWA token). |
-| `test/` | Foundry test suite — happy paths, finality edge cases, compliance routing, replay/unauthorized rejection. |
-| `script/` | Foundry scripts: `Deploy.s.sol` (full stack), `Seed.s.sol` (re-mint / re-verify). |
-| `scripts/` | Ops helpers: role-wallet generation, role funding, local E2E replay, testnet verify, one-shot mainnet deploy. |
-| `services/` | Node.js signer ×3 + custodian services (deployed on Railway). |
-| `frontend/` | Next.js dashboard. |
-| `deployments/` | Environment files (gitignored; `.env.example` variants are committed). |
+| `src/` | Smart contracts: registry, adapters, compliance, signer, breaker, recorder |
+| `src/interfaces/` | Protocol interfaces and shared redemption types |
+| `src/mocks/` | ERC-3643-flavored test fixtures |
+| `test/` | Foundry tests for happy paths, finality, compliance, replay and authorization failures |
+| `script/` | Foundry deployment and seed scripts |
+| `scripts/` | Ops helpers for local replay, role setup, funding and deployment |
+| `services/` | Node.js signer processes and custodian service |
+| `frontend/` | Next.js dashboard |
+| `deployments/` | Environment templates and deployment configuration |
 
-
-## Getting started
-
-### Prerequisites
-
-- [Foundry](https://book.getfoundry.sh/) — `forge`, `cast`
-- Node.js ≥ 20 for the frontend, ≥ 24 for the services
-- An EIP-1193 wallet (e.g. MetaMask) for the dashboard
-
-### Run the test suite
+## Validation evidence
 
 ```bash
-forge install        # first time only
+forge install
 forge build
 forge test -vvv      # 44 tests
 forge coverage       # ~90.6% line coverage on core contracts
 ```
 
-### Local development (Anvil)
+The suite covers finality/reorg edge cases, compliance-flag routing, threshold-exceeded review, replay rejection, unauthorized signers, and the core redemption state machine.
 
-```bash
-anvil                     # terminal 1 — local EVM (chainId 31337)
-
-# terminal 2 — deploy the full stack to localhost (mints the demo RWA balance)
-MINT_AMOUNT=20000ether \
-forge script script/Deploy.s.sol:ClearlineDeploy --rpc-url local --broadcast \
-  --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf7f268
-
-# terminal 3 — frontend
-cd frontend && npm install && cp .env.example .env.local   # paste deployed addresses
-npm run dev
-
-# terminal 4 — services (one process per signer, plus the custodian)
-cd services && npm install
-npm run start:signer        # ×3, each with a different PRIVATE_KEY
-npm run start:custodian
-```
-
-Anvil ships deterministic development accounts; the deployer (anvil account #0) receives the demo RWA balance. Add the network (`http://127.0.0.1:8545`, chainId `31337`) in MetaMask and import the anvil key above to use the dashboard.
-
-For a scripted end-to-end replay of every pipeline branch (happy path, compliance flag + board override, request-and-lock finalize/cancel), run:
+A scripted local E2E replay is also included:
 
 ```bash
 scripts/demo-local.sh
 ```
 
-## Deployment
+It exercises the happy path, compliance flag + board override, and request-and-lock finalize/cancel branches.
 
-### HSK Chain testnet (chainId 133)
+## Quick start
 
-The full stack is deployed and Blockscout-verified on HSK testnet.
+### Prerequisites
+
+- [Foundry](https://book.getfoundry.sh/)
+- Node.js ≥ 20 for the frontend, ≥ 24 for services
+- EIP-1193 wallet such as MetaMask
+
+### Contracts
+
+```bash
+forge install
+forge build
+forge test -vvv
+```
+
+### Local Anvil stack
+
+```bash
+anvil
+
+MINT_AMOUNT=20000ether \
+forge script script/Deploy.s.sol:ClearlineDeploy \
+  --rpc-url local \
+  --broadcast \
+  --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf7f268
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+### Services
+
+```bash
+cd services
+npm install
+npm run start:signer
+npm run start:custodian
+```
+
+## Public testnet deployment
+
+### HSK Chain testnet — chainId 133
+
+The current stack is deployed and Blockscout-verified.
 
 | Contract | Address |
 | --- | --- |
@@ -136,87 +176,64 @@ The full stack is deployed and Blockscout-verified on HSK testnet.
 | CircuitBreaker | `0x8D40f9D47886f21223357874e1a99a22DD4f9E5e` |
 | SettlementRecorder | `0x4CdF78C7830FE120d0c2Be8123e8AE4DEe6402bA` |
 
-Configuration on testnet: signer threshold **2-of-3**, board **2-of-2**, finality depth **12 blocks**. Multiple redemptions have completed the full lifecycle (trigger → finality → compliance → threshold signatures → settlement) against the live RPC with the signer and custodian services running.
+Configuration: **2-of-3 signer threshold**, **2-of-2 board**, **12-block finality depth**.
 
-#### Deploying a fresh testnet stack
+Multiple redemptions have completed the full lifecycle on testnet:
 
-```bash
-# 1. Generate dedicated role wallets → deployments/testnet.roles.env (gitignored)
-./scripts/gen-role-wallets.sh testnet
-
-# 2. Seed gas into each role wallet from your funded deployer
-FUNDING_KEY=0x… ./scripts/fund-roles.sh testnet
-
-# 3. Deploy + wire the stack (export HSK_TESTNET_RPC first; see foundry.toml)
-DEPLOYER_KEY=0x… \
-SIGNER_ADDRS=<S1>,<S2>,<S3> BOARD_ADDRS=<A>,<B> ATTESTOR_ADDR=<0x…> HOLDER=<0x…> \
-MINT_AMOUNT=25000ether \
-forge script script/Deploy.s.sol:ClearlineDeploy --rpc-url hsk_testnet --broadcast --verify
+```text
+trigger → finality → compliance → threshold signatures → settlement
 ```
 
-Paste the printed addresses into `frontend/.env.local` and the service environments.
+Frontend status: `clearline-testnet.vercel.app`
 
-### HSK Chain mainnet (chainId 177)
+## Mainnet readiness
 
-The mainnet deployment is prepared but **not yet broadcast**. `Deploy.s.sol` enforces a hard guardrail — it refuses to broadcast on chainId 177 unless `CONFIRM_MAINNET=true` is set. The one-shot runner handles the rest:
+HSK mainnet deployment is prepared but **not broadcast**.
+
+`Deploy.s.sol` refuses to broadcast on chainId 177 unless:
 
 ```bash
-# deployments/mainnet.env holds the configuration (gitignored; fill DEPLOYER_KEY)
-./scripts/deploy-mainnet.sh
+CONFIRM_MAINNET=true
 ```
 
-The runner: validates the chain and balances → seeds the role wallets (configurable, minimal by default) → **dry-runs the full deployment and aborts if the deployer cannot cover the estimated cost** → broadcasts → captures the deployed addresses into `deployments/mainnet.addresses.env`. After deployment, the same env-driven build serves the mainnet frontend (`clearline-mainnet` Vercel project) and a dedicated set of Railway services.
-
+The one-shot deployment runner validates chain and balances, funds role wallets, dry-runs the deployment, checks estimated cost, broadcasts, and records resulting addresses.
 
 ## Configuration
 
-### Frontend (`frontend/.env.example`)
-
-One set of values per deployment target — the same build serves testnet or mainnet.
+### Frontend
 
 | Variable | Purpose |
 | --- | --- |
-| `NEXT_PUBLIC_CHAIN_ID` / `NEXT_PUBLIC_RPC_URL` / `NEXT_PUBLIC_EXPLORER` | Network identity (133 testnet / 177 mainnet). |
-| `NEXT_PUBLIC_ENVIRONMENT` / `NEXT_PUBLIC_CHAIN_NAME` | Environment pill and labels in the UI. |
-| `NEXT_PUBLIC_TOKEN` … `NEXT_PUBLIC_IDENTITY` | Deployed contract addresses. |
-| `NEXT_PUBLIC_HEALTH_URLS` | Optional service health-panel URLs. |
-
-Env-provided addresses are validated (strict 40-hex, stray-character sanitized) at build time, so a malformed value fails loudly instead of silently pointing at a placeholder.
+| `NEXT_PUBLIC_CHAIN_ID` / `NEXT_PUBLIC_RPC_URL` / `NEXT_PUBLIC_EXPLORER` | Network identity |
+| `NEXT_PUBLIC_ENVIRONMENT` / `NEXT_PUBLIC_CHAIN_NAME` | Environment labels |
+| `NEXT_PUBLIC_TOKEN` … `NEXT_PUBLIC_IDENTITY` | Deployed contract addresses |
+| `NEXT_PUBLIC_HEALTH_URLS` | Optional service health URLs |
 
 ### Services
 
 | Variable | Purpose |
 | --- | --- |
-| `RPC_URL` / `CHAIN_ID` | Target network. |
-| `PRIVATE_KEY` | Signing key (signer) or attestor key (custodian). |
-| `SIGNER_CONTRACT` / `REGISTRY_ADDRESS` / `SETTLEMENT_ADDRESS` | Deployed contract addresses. |
-| `POLL_MS` / `SETTLEMENT_DELAY_MS` | Poll cadence and settlement delay. |
-| `PORT` / `HEALTH_PORT` | HTTP health endpoint. |
+| `RPC_URL` / `CHAIN_ID` | Target network |
+| `PRIVATE_KEY` | Signer or attestor key |
+| `SIGNER_CONTRACT` / `REGISTRY_ADDRESS` / `SETTLEMENT_ADDRESS` | Deployed addresses |
+| `POLL_MS` / `SETTLEMENT_DELAY_MS` | Service cadence |
+| `PORT` / `HEALTH_PORT` | Health endpoint configuration |
 
-Reference environment sets live in `deployments/` (`railway.env`, `signer-1.env` … `signer-3.env`, `custodian.env`, `local.env.example`).
+## CI
 
-## Testing & CI
+`.github/workflows/ci.yml` runs:
 
-- **Foundry suite** — 44 tests, ~90.6% average line coverage on core contracts, covering finality/reorg edge cases, compliance-flag routing to manual review, threshold-exceeded review, signature replay rejection, and unauthorized-signer rejection.
-- **End-to-end validation** — `scripts/demo-local.sh` replays every pipeline branch against a local stack; the live testnet deployment has settled real redemptions through the full lifecycle with independent signer processes and the custodian service.
-- **CI** (`.github/workflows/ci.yml`) runs `forge test`, `forge coverage`, and TypeScript typechecks for the frontend and services on every push.
+- Foundry tests
+- Foundry coverage
+- TypeScript typechecks for frontend and services
 
-## Security & operational model
+## Scope note
 
-- **Threshold signing** — release instructions require the configured signer quorum (2-of-3 by default); every signature is verified on-chain with nonce/deadline protection against replay.
-- **Finality before action** — no downstream step is reachable until the configured block depth is reached.
-- **Compliance gate** — payouts to unverified destinations are routed to a manual-review queue and require a board vote.
-- **Explicit mainnet opt-in** — chainId-177 broadcasts require `CONFIRM_MAINNET=true`, and the deploy runner dry-runs and cost-checks the whole batch first.
-- **Key hygiene** — role keys are generated locally, stored in gitignored `deployments/*.roles.env` (mode 600), and never committed or logged.
-
-### Test fixtures
-
-`MockRWAToken` (`CLRWA`) and `MockIdentityRegistry` are ERC-3643-flavored fixtures used for validation. A production deployment wires the same adapters and pipeline to a real issuer contract and identity registry, and the settlement attestor is an actual custodian process.
+`MockRWAToken` and `MockIdentityRegistry` are ERC-3643-flavored fixtures used for validation. A production deployment would connect the same redemption pipeline to a real issuer contract, identity registry, and custodian integration.
 
 ## Status
 
 | Network | Contracts | Frontend | Services |
 | --- | --- | --- | --- |
-| HSK testnet (133) | Deployed + Blockscout-verified | Live — `clearline-testnet.vercel.app` | 4 services online (Railway) |
-| HSK mainnet (177) | Prepared, not yet broadcast | Project configured | To be provisioned at go-live |
-
+| HSK testnet (133) | Deployed + Blockscout-verified | Live | 4 services online |
+| HSK mainnet (177) | Prepared, not broadcast | Project configured | Provision at go-live |
