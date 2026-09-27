@@ -873,4 +873,26 @@ contract ClearlineTest is Test {
         vm.prank(attestor);
         settlement.confirmSettlement(redemptionId, ref, abi.encodePacked(r, s, v));
     }
+    function test_AttestorEnableIsIdempotent() public {
+        vm.prank(owner);
+        settlement.setAttestor(attestor, true);
+        assertEq(settlement.attestorCount(), 1, 'duplicate enable inflates count');
+    }
+    function test_DisablingUnknownAttestorPreservesCount() public {
+        vm.prank(owner);
+        settlement.setAttestor(stranger, false);
+        assertEq(settlement.attestorCount(), 1, 'unknown disable reduces count');
+    }
+    function testFuzz_AttestorCountTracksMembership(uint256 actions) public {
+        for (uint256 i = 0; i < 64; i++) {
+            address target = (actions & 1) == 0 ? attestor : stranger;
+            bool enabled = (actions & 2) != 0;
+            vm.prank(owner);
+            settlement.setAttestor(target, enabled);
+            uint256 expected = (settlement.isAttestor(attestor) ? 1 : 0)
+                + (settlement.isAttestor(stranger) ? 1 : 0);
+            assertEq(settlement.attestorCount(), expected);
+            actions >>= 2;
+        }
+    }
 }
