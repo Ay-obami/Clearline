@@ -9,7 +9,7 @@ exports.settlementDomain = settlementDomain;
  *
  *   RedemptionInstruction(bytes32 assetId,address holder,uint256 amount,
  *     address destination,uint8 triggerType,bytes32 sourceEventHash,
- *     bytes32 complianceHash,uint256 nonce,uint256 deadline)
+ *     bytes32 complianceHash,uint256 nonce,uint256 deadline,uint256 signerEpoch)
  */
 exports.instructionTypes = {
     RedemptionInstruction: [
@@ -22,12 +22,13 @@ exports.instructionTypes = {
         { name: "complianceHash", type: "bytes32" },
         { name: "nonce", type: "uint256" },
         { name: "deadline", type: "uint256" },
+        { name: "signerEpoch", type: "uint256" },
     ],
 };
 function instructionDomain(chainId, verifyingContract) {
     return {
         name: "Clearline",
-        version: "1",
+        version: "2",
         chainId,
         verifyingContract,
     };
@@ -44,5 +45,6 @@ function settlementDomain(chainId, verifyingContract) {
         verifyingContract,
     };
 }
-exports.EIP712_VERSION = "1";
+// Release-instruction version; settlement confirmations remain version 1.
+exports.EIP712_VERSION = "2";
 exports.EIP712_NAME = "Clearline";

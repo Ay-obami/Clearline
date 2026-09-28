@@ -27,14 +27,38 @@ contract CircuitBreaker {
     address[] public board;
     mapping(address => bool) public isBoardMember;
     uint256 public overrideThreshold;
+    uint256 public boardEpoch;
+    mapping(uint256 redemptionId => uint256 epoch) public resolvedEpochOf;
 
     bool public paused;
 
-    mapping(uint256 redemptionId => mapping(address voter => bool voted)) public hasVoted;
-    mapping(uint256 redemptionId => uint256 approveVotes) public approveCountOf;
-    mapping(uint256 redemptionId => uint256 rejectVotes) public rejectCountOf;
+    mapping(uint256 epoch => mapping(uint256 id => mapping(address voter => bool))) private _hasVoted;
+    mapping(uint256 epoch => mapping(uint256 id => uint256)) private _approveCount;
+    mapping(uint256 epoch => mapping(uint256 id => uint256)) private _rejectCount;
+
+    function _voteEpochFor(uint256 id) internal view returns (uint256) {
+        uint256 finalized = resolvedEpochOf[id];
+        return finalized == 0 ? boardEpoch : finalized;
+    }
+
+    function hasVoted(uint256 id, address account) public view returns (bool) {
+        return _hasVoted[_voteEpochFor(id)][id][account];
+    }
+
+    function approveCountOf(uint256 id) public view returns (uint256) {
+        return _approveCount[_voteEpochFor(id)][id];
+    }
+
+    function rejectCountOf(uint256 id) public view returns (uint256) {
+        return _rejectCount[_voteEpochFor(id)][id];
+    }
+
+    function votesAtEpoch(uint256 id, uint256 epoch) external view returns (uint256, uint256) {
+        return (_approveCount[epoch][id], _rejectCount[epoch][id]);
+    }
 
     event PausedSet(bool paused);
+    event BoardEpochStarted(uint256 indexed epoch);
     event BoardUpdated(address[] members, uint256 threshold);
 
     error NotAuthorized();
@@ -64,6 +88,9 @@ contract CircuitBreaker {
         if (members.length == 0) revert ZeroAddress();
         if (threshold_ == 0 || threshold_ > members.length) revert InvalidThreshold();
 
+        for (uint256 i = 0; i < board.length; i++) {
+            isBoardMember[board[i]] = false;
+        }
         delete board;
         for (uint256 i = 0; i < members.length; i++) {
             address m = members[i];
@@ -73,6 +100,8 @@ contract CircuitBreaker {
             board.push(m);
         }
         overrideThreshold = threshold_;
+        boardEpoch++;
+        emit BoardEpochStarted(boardEpoch);
         emit BoardUpdated(members, threshold_);
     }
 
@@ -110,20 +139,21 @@ contract CircuitBreaker {
         if (status != IRedemptionTypes.Status.Flagged && status != IRedemptionTypes.Status.InManualReview) {
             revert IRedemptionTypes.InvalidStatus(status);
         }
-        if (hasVoted[redemptionId][msg.sender]) revert AlreadyVoted();
-        hasVoted[redemptionId][msg.sender] = true;
+        if (_hasVoted[boardEpoch][redemptionId][msg.sender]) revert AlreadyVoted();
+        _hasVoted[boardEpoch][redemptionId][msg.sender] = true;
 
         emit IRedemptionTypes.ReviewVoteCast(redemptionId, msg.sender, approve);
 
         if (approve) {
-            thresholdReached = ++approveCountOf[redemptionId] >= overrideThreshold;
+            thresholdReached = ++_approveCount[boardEpoch][redemptionId] >= overrideThreshold;
         } else {
-            thresholdReached = ++rejectCountOf[redemptionId] >= overrideThreshold;
+            thresholdReached = ++_rejectCount[boardEpoch][redemptionId] >= overrideThreshold;
         }
+        if (thresholdReached) resolvedEpochOf[redemptionId] = boardEpoch;
     }
 
     /// @notice View: how many approve/reject votes are recorded for a redemption.
     function votesFor(uint256 redemptionId) external view returns (uint256 approves, uint256 rejects) {
-        return (approveCountOf[redemptionId], rejectCountOf[redemptionId]);
+        return (approveCountOf(redemptionId), rejectCountOf(redemptionId));
     }
 }

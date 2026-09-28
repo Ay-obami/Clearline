@@ -52,3 +52,5 @@ jobs:
       - run: npm install
       - name: Typecheck
         run: npx tsc --noEmit
+      - name: Signer integration regressions
+        run: npm test
