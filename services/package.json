@@ -14,7 +14,8 @@
     "start": "node dist/scripts/start.js",
     "start:signer": "tsx signer/src/index.ts",
     "start:custodian": "tsx custodian/src/index.ts",
-    "test": "npm run build && node --test test/*.test.cjs"
+    "test": "npm run build && node --test test/*.test.cjs",
+    "test:chain": "npm run build && forge build --root .. && node test/chain-rehearsal.cjs"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
