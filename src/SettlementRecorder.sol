@@ -63,10 +63,11 @@ contract SettlementRecorder {
 
     function setAttestor(address attestor, bool enabled) external onlyOwner {
         if (attestor == address(0)) revert ZeroAddress();
+        if (isAttestor[attestor] == enabled) return;
         isAttestor[attestor] = enabled;
         if (enabled) {
             attestorCount++;
-        } else if (attestorCount > 0) {
+        } else {
             attestorCount--;
         }
         emit AttestorUpdated(attestor, enabled);
