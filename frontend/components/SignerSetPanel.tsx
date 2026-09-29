@@ -130,6 +130,14 @@ export function SignerSetPanel({ redemptionId }: { redemptionId?: number }) {
     query: { enabled: redemptionId != null },
   });
 
+  const finalizedEpochQ = useReadContract({
+    address: SIGNER_CONTRACT,
+    abi: signerAbi,
+    functionName: "signedEpochOf",
+    args: redemptionId != null ? [BigInt(redemptionId)] : undefined,
+    query: { enabled: redemptionId != null },
+  });
+
   const n = Number(countQ.data ?? 0);
   const threshold = Number(thresholdQ.data ?? 0);
   const collectedList = (
@@ -137,6 +145,29 @@ export function SignerSetPanel({ redemptionId }: { redemptionId?: number }) {
   ).map((a) => a.toLowerCase());
   const collected = new Set<string>(collectedList);
   const sigCount = collectedList.length;
+
+  if (redemptionId != null && (finalizedEpochQ.isLoading || collectedQ.isLoading)) {
+    return <p className="text-xs text-mute">Loading authorization record…</p>;
+  }
+  if (redemptionId != null && (finalizedEpochQ.isError || collectedQ.isError)) {
+    return <p className="text-xs text-mute">Unable to read the v2 authorization record. Check the configured deployment.</p>;
+  }
+  if (Number(finalizedEpochQ.data ?? 0) > 0) {
+    return (
+      <div>
+        <p className="mb-3 text-sm font-medium text-ink">Finalized authorization · {sigCount} signatures</p>
+        <div className="space-y-2">
+          {collectedList.map((address) => (
+            <div key={address} className="flex items-center justify-between rounded-[8px] border border-line px-3 py-2">
+              <Addr value={address} />
+              <span className="text-xs text-brand">signed</span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-mute">Recorded signers at authorization time; later group changes do not alter this record.</p>
+      </div>
+    );
+  }
 
   return (
     <div>

@@ -234,6 +234,7 @@ export const signerAbi = [
           { name: "complianceHash", type: "bytes32" },
           { name: "nonce", type: "uint256" },
           { name: "deadline", type: "uint256" },
+          { name: "signerEpoch", type: "uint256" },
         ],
       },
       { name: "digest", type: "bytes32" },
@@ -242,6 +243,7 @@ export const signerAbi = [
   { type: "function", name: "threshold", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "signerCount", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
   { type: "function", name: "signers", stateMutability: "view", inputs: [{ name: "index", type: "uint256" }], outputs: [{ type: "address" }] },
+  { type: "function", name: "signedEpochOf", stateMutability: "view", inputs: [{ name: "id", type: "uint256" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "signatureCount", stateMutability: "view", inputs: [{ name: "id", type: "uint256" }], outputs: [{ type: "uint256" }] },
   { type: "function", name: "collectedSigners", stateMutability: "view", inputs: [{ name: "id", type: "uint256" }], outputs: [{ type: "address[]" }] },
 ] as const satisfies Abi;

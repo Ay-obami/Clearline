@@ -43,6 +43,10 @@ The system is a **consumer of ERC-3643 interfaces**. It automates redemption ini
 
 Every redemption is tagged by trigger type and traceable end-to-end via `RedemptionRegistry.getRedemption(id)`.
 
+## Authorization rotation v2 (unreleased)
+
+This branch introduces signer/board configuration epochs and EIP-712 release-instruction version 2. It requires coordinated new contract addresses and updated clients; existing testnet deployments remain v1. See [rotation policy and migration gates](docs/AUTHORIZATION_ROTATION_V2.md). The branch has 62 Foundry tests and seven signer-service regressions. The 44-test/coverage figures elsewhere describe the original v1 release; coverage has not been remeasured for v2.
+
 ## Security model
 
 Clearline is designed around explicit authorization boundaries rather than a single privileged backend process.

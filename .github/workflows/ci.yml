@@ -46,9 +46,18 @@ jobs:
         working-directory: services
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.8.3
       - uses: actions/setup-node@v4
         with:
           node-version: 20
       - run: npm install
       - name: Typecheck
         run: npx tsc --noEmit
+      - name: Signer integration regressions
+        run: npm test
+      - name: Local-chain rotation and settlement rehearsal
+        run: npm run test:chain

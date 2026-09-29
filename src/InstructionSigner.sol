@@ -12,7 +12,7 @@ import {IRedemptionTypes} from "./interfaces/IRedemptionTypes.sol";
  * the threshold is met the instruction is marked Signed in the registry and the
  * canonical `InstructionSigned` event fires for custodian systems to consume.
  *
- * The typed struct matches PRD 4.2.4 exactly:
+ * The v2 typed struct extends PRD 4.2.4 with a signer configuration epoch:
  *
  *   RedemptionInstruction {
  *       bytes32 assetId;          // registered RWA token identifier
@@ -24,6 +24,7 @@ import {IRedemptionTypes} from "./interfaces/IRedemptionTypes.sol";
  *       bytes32 complianceHash;   // hash of the compliance re-check result
  *       uint256 nonce;            // replay protection (= redemptionId)
  *       uint256 deadline;         // instruction expiry
+ *       uint256 signerEpoch;      // signer configuration version
  *   }
  *
  * Security properties:
@@ -49,14 +50,15 @@ contract InstructionSigner {
         "bytes32 sourceEventHash,"
         "bytes32 complianceHash,"
         "uint256 nonce,"
-        "uint256 deadline)"
+        "uint256 deadline,"
+        "uint256 signerEpoch)"
     );
 
     bytes32 public constant DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
 
     string public constant NAME = "Clearline";
-    string public constant VERSION = "1";
+    string public constant VERSION = "2";
 
     /// @dev Deterministic asset identifier: left-padded token address. Documented
     /// as the registered RWA identifier for v1 (FR15 keeps integration standard).
@@ -74,9 +76,13 @@ contract InstructionSigner {
     address[] public signers;
     mapping(address => bool) public isSigner;
     uint256 public threshold;
+    uint256 public signerEpoch;
+    mapping(uint256 redemptionId => uint256 epoch) public signedEpochOf;
+    mapping(uint256 redemptionId => uint256 deadline) public signedDeadlineOf;
     uint64 public signingWindow = 3 days;
     address public circuitBreaker; // optional; when set, signing pauses with it
 
+    event SignerEpochStarted(uint256 indexed epoch);
     event SignersUpdated(address[] signers, uint256 threshold);
     event SigningWindowUpdated(uint64 window);
     event CircuitBreakerSet(address breaker);
@@ -108,6 +114,9 @@ contract InstructionSigner {
         if (newSigners.length == 0 || newSigners.length > 10) revert TooManySigners();
         if (newThreshold == 0 || newThreshold > newSigners.length) revert InvalidThreshold();
 
+        for (uint256 i = 0; i < signers.length; i++) {
+            isSigner[signers[i]] = false;
+        }
         delete signers;
         for (uint256 i = 0; i < newSigners.length; i++) {
             address s = newSigners[i];
@@ -117,12 +126,16 @@ contract InstructionSigner {
             signers.push(s);
         }
         threshold = newThreshold;
+        signerEpoch++;
+        emit SignerEpochStarted(signerEpoch);
         emit SignersUpdated(newSigners, newThreshold);
     }
 
     function setSigningWindow(uint64 window) external onlyOwner {
         if (window == 0) revert ZeroAmount();
         signingWindow = window;
+        signerEpoch++;
+        emit SignerEpochStarted(signerEpoch);
         emit SigningWindowUpdated(window);
     }
 
@@ -139,8 +152,10 @@ contract InstructionSigner {
     // Instruction construction
     // ------------------------------------------------------------------
 
-    /// @dev Deadline for an instruction: finality-confirmed time + signing window.
+    /// @dev Deadline: requestedAt (set on finality confirmation) + signing window.
     function deadlineFor(uint256 redemptionId) public view returns (uint256) {
+        uint256 finalizedDeadline = signedDeadlineOf[redemptionId];
+        if (finalizedDeadline != 0) return finalizedDeadline;
         return uint256(registry.getRedemption(redemptionId).requestedAt) + signingWindow;
     }
 
@@ -161,7 +176,8 @@ contract InstructionSigner {
             sourceEventHash: r.sourceEventHash,
             complianceHash: r.complianceHash,
             nonce: redemptionId,
-            deadline: deadlineFor(redemptionId)
+            deadline: deadlineFor(redemptionId),
+            signerEpoch: _signatureEpochFor(redemptionId)
         });
         digest = _hashTypedData(instruction);
     }
@@ -176,6 +192,7 @@ contract InstructionSigner {
         bytes32 complianceHash;
         uint256 nonce;
         uint256 deadline;
+        uint256 signerEpoch;
     }
 
     function _hashTypedData(RedemptionInstruction memory i) internal view returns (bytes32) {
@@ -199,7 +216,8 @@ contract InstructionSigner {
                 i.sourceEventHash,
                 i.complianceHash,
                 i.nonce,
-                i.deadline
+                i.deadline,
+                i.signerEpoch
             )
         );
         return keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
@@ -209,9 +227,28 @@ contract InstructionSigner {
     // Signature collection
     // ------------------------------------------------------------------
 
-    mapping(uint256 redemptionId => mapping(address signer => bool signed)) public hasSigned;
-    mapping(uint256 redemptionId => address[] collected) private _collectedSigners;
-    mapping(uint256 redemptionId => bytes32 digest) public instructionDigestOf;
+    mapping(uint256 epoch => mapping(uint256 id => mapping(address signer => bool))) private _hasSigned;
+    mapping(uint256 epoch => mapping(uint256 id => address[])) private _collectedSigners;
+    mapping(uint256 epoch => mapping(uint256 id => bytes32)) private _instructionDigests;
+
+    // Completed authorizations retain their original audit snapshot. Pending
+    // authorizations always use the current configuration and start empty.
+    function _signatureEpochFor(uint256 id) internal view returns (uint256) {
+        uint256 finalized = signedEpochOf[id];
+        return finalized == 0 ? signerEpoch : finalized;
+    }
+
+    function hasSigned(uint256 id, address account) public view returns (bool) {
+        return _hasSigned[_signatureEpochFor(id)][id][account];
+    }
+
+    function instructionDigestOf(uint256 id) public view returns (bytes32) {
+        return _instructionDigests[_signatureEpochFor(id)][id];
+    }
+
+    function collectedSignersAtEpoch(uint256 id, uint256 epoch) external view returns (address[] memory) {
+        return _collectedSigners[epoch][id];
+    }
 
     /// @notice Submit one EIP-712 signature over the instruction. When the
     /// threshold of distinct configured signers is reached, the redemption is
@@ -232,28 +269,30 @@ contract InstructionSigner {
         (, bytes32 digest) = getInstruction(redemptionId);
         address recovered = _recoverSigner(digest, signature);
         if (!isSigner[recovered]) revert UnauthorizedSigner(recovered);
-        if (hasSigned[redemptionId][recovered]) revert SignatureAlreadySubmitted();
+        if (_hasSigned[signerEpoch][redemptionId][recovered]) revert SignatureAlreadySubmitted();
 
-        hasSigned[redemptionId][recovered] = true;
-        _collectedSigners[redemptionId].push(recovered);
-        instructionDigestOf[redemptionId] = digest;
+        _hasSigned[signerEpoch][redemptionId][recovered] = true;
+        _collectedSigners[signerEpoch][redemptionId].push(recovered);
+        _instructionDigests[signerEpoch][redemptionId] = digest;
 
         emit IRedemptionTypes.SignatureCollected(
-            redemptionId, recovered, _collectedSigners[redemptionId].length, threshold
+            redemptionId, recovered, _collectedSigners[signerEpoch][redemptionId].length, threshold
         );
 
-        if (_collectedSigners[redemptionId].length >= threshold) {
+        if (_collectedSigners[signerEpoch][redemptionId].length >= threshold) {
+            signedDeadlineOf[redemptionId] = deadlineFor(redemptionId);
+            signedEpochOf[redemptionId] = signerEpoch;
             registry.markSigned(redemptionId, digest);
-            emit IRedemptionTypes.InstructionSigned(redemptionId, digest, _collectedSigners[redemptionId]);
+            emit IRedemptionTypes.InstructionSigned(redemptionId, digest, _collectedSigners[signerEpoch][redemptionId]);
         }
     }
 
     function collectedSigners(uint256 redemptionId) external view returns (address[] memory) {
-        return _collectedSigners[redemptionId];
+        return _collectedSigners[_signatureEpochFor(redemptionId)][redemptionId];
     }
 
     function signatureCount(uint256 redemptionId) external view returns (uint256) {
-        return _collectedSigners[redemptionId].length;
+        return _collectedSigners[_signatureEpochFor(redemptionId)][redemptionId].length;
     }
 
     /// @dev Extract (v,r,s) from a 65-byte calldata signature and run ecrecover.

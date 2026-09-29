@@ -27,11 +27,13 @@ exports.registryAbi = [
 exports.signerAbi = [
     "event SignatureCollected(uint256 indexed id, address indexed signer, uint256 collected, uint256 threshold)",
     "event InstructionSigned(uint256 indexed id, bytes32 instructionHash, address[] signers)",
-    "function getInstruction(uint256 id) external view returns (tuple(bytes32 assetId,address holder,uint256 amount,address destination,uint8 triggerType,bytes32 sourceEventHash,bytes32 complianceHash,uint256 nonce,uint256 deadline), bytes32 digest)",
+    "function getInstruction(uint256 id) external view returns (tuple(bytes32 assetId,address holder,uint256 amount,address destination,uint8 triggerType,bytes32 sourceEventHash,bytes32 complianceHash,uint256 nonce,uint256 deadline,uint256 signerEpoch), bytes32 digest)",
     "function submitSignature(uint256 id, bytes calldata sig)",
     "function threshold() external view returns (uint256)",
     "function signers(uint256) external view returns (address)",
     "function isSigner(address) external view returns (bool)",
+    "function hasSigned(uint256 id, address account) external view returns (bool)",
+    "function VERSION() external view returns (string)",
     "function signingWindow() external view returns (uint64)"
 ];
 exports.breakerAbi = [

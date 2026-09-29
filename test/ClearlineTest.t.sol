@@ -895,4 +895,253 @@ contract ClearlineTest is Test {
             actions >>= 2;
         }
     }
+
+    function _approvedForRotation() internal returns (uint256 id) {
+        vm.prank(alice);
+        token.approve(address(directBurn), REDEEM_AMOUNT);
+        vm.prank(alice);
+        id = directBurn.redeem(REDEEM_AMOUNT, bob);
+        vm.roll(block.number + FINALITY_DEPTH);
+        registry.confirmFinality(id);
+        compliance.runCheck(id);
+    }
+
+    function _rotateSignersForTest() internal {
+        address[] memory members = new address[](2);
+        members[0] = stranger;
+        members[1] = bob;
+        vm.prank(owner);
+        signer.setSigners(members, 2);
+    }
+
+    function _rotateBoardForTest() internal {
+        address[] memory members = new address[](2);
+        members[0] = stranger;
+        members[1] = bob;
+        vm.prank(owner);
+        breaker.setBoard(members, 2);
+    }
+
+    function test_Rotation_RemovesOldSigners() public {
+        _rotateSignersForTest();
+        assertFalse(signer.isSigner(signer1));
+        assertFalse(signer.isSigner(signer2));
+        assertFalse(signer.isSigner(signer3));
+    }
+
+    function test_Rotation_RemovesOldBoard() public {
+        _rotateBoardForTest();
+        assertFalse(breaker.isBoardMember(boardMember1));
+        assertFalse(breaker.isBoardMember(boardMember2));
+    }
+
+    function test_Rotation_AllowsRetainedMembers() public {
+        address[] memory members = new address[](2);
+        members[0] = signer1;
+        members[1] = stranger;
+        vm.prank(owner);
+        signer.setSigners(members, 2);
+        members[0] = boardMember1;
+        vm.prank(owner);
+        breaker.setBoard(members, 2);
+        assertTrue(signer.isSigner(signer1));
+        assertTrue(breaker.isBoardMember(boardMember1));
+    }
+
+    function test_Rotation_ChangesInstructionDigest() public {
+        uint256 id = _approvedForRotation();
+        (, bytes32 beforeDigest) = signer.getInstruction(id);
+        _rotateSignersForTest();
+        (, bytes32 afterDigest) = signer.getInstruction(id);
+        assertNotEq(beforeDigest, afterDigest);
+    }
+
+    function test_Rotation_ResetsPendingSignatures() public {
+        uint256 id = _approvedForRotation();
+        _sign(id, PK_SIG1);
+        _rotateSignersForTest();
+        assertEq(signer.signatureCount(id), 0);
+        assertFalse(signer.hasSigned(id, signer1));
+        _sign(id, PK_STR);
+        assertEq(uint8(registry.statusOf(id)), uint8(IRedemptionTypes.Status.Approved));
+        _sign(id, PK_BOB);
+        assertEq(uint8(registry.statusOf(id)), uint8(IRedemptionTypes.Status.Signed));
+    }
+
+    function test_Rotation_RejectsRemovedSigner() public {
+        uint256 id = _approvedForRotation();
+        _rotateSignersForTest();
+        (, bytes32 digest) = signer.getInstruction(id);
+        (uint8 v, bytes32 r, bytes32 sigS) = vm.sign(PK_SIG1, digest);
+        vm.expectRevert(abi.encodeWithSelector(InstructionSigner.UnauthorizedSigner.selector, signer1));
+        signer.submitSignature(id, abi.encodePacked(r, sigS, v));
+    }
+
+    function test_Rotation_ResetsBothPendingVoteCounts() public {
+        vm.prank(owner);
+        idRegistry.setSanctioned(bob, true);
+        uint256 id = _approvedForRotation();
+        vm.prank(boardMember1);
+        breaker.voteApprove(id);
+        vm.prank(boardMember2);
+        breaker.voteReject(id);
+        _rotateBoardForTest();
+        (uint256 approvals, uint256 rejections) = breaker.votesFor(id);
+        assertEq(approvals, 0);
+        assertEq(rejections, 0);
+        assertFalse(breaker.hasVoted(id, boardMember1));
+        vm.prank(stranger);
+        breaker.voteApprove(id);
+        assertEq(uint8(registry.statusOf(id)), uint8(IRedemptionTypes.Status.Flagged));
+        vm.prank(bob);
+        breaker.voteApprove(id);
+        assertEq(uint8(registry.statusOf(id)), uint8(IRedemptionTypes.Status.Approved));
+    }
+
+    function test_Rotation_RetainedSignerCannotReplayOldPayload() public {
+        uint256 id = _approvedForRotation();
+        (, bytes32 oldDigest) = signer.getInstruction(id);
+        (uint8 v, bytes32 r, bytes32 sigS) = vm.sign(PK_SIG1, oldDigest);
+        address[] memory members = new address[](2);
+        members[0] = signer1;
+        members[1] = stranger;
+        vm.prank(owner);
+        signer.setSigners(members, 2);
+        vm.expectRevert();
+        signer.submitSignature(id, abi.encodePacked(r, sigS, v));
+        _sign(id, PK_SIG1);
+        _sign(id, PK_STR);
+        assertEq(uint8(registry.statusOf(id)), uint8(IRedemptionTypes.Status.Signed));
+    }
+
+    function test_Rotation_WindowChangeResetsPendingPayload() public {
+        uint256 id = _approvedForRotation();
+        _sign(id, PK_SIG1);
+        (, bytes32 oldDigest) = signer.getInstruction(id);
+        vm.prank(owner);
+        signer.setSigningWindow(4 days);
+        assertEq(signer.signatureCount(id), 0);
+        assertEq(signer.instructionDigestOf(id), bytes32(0));
+        (, bytes32 newDigest) = signer.getInstruction(id);
+        assertNotEq(oldDigest, newDigest);
+        _sign(id, PK_SIG2);
+        assertEq(uint8(registry.statusOf(id)), uint8(IRedemptionTypes.Status.Approved));
+        _sign(id, PK_SIG1);
+        assertEq(uint8(registry.statusOf(id)), uint8(IRedemptionTypes.Status.Signed));
+    }
+
+    function test_Rotation_PreservesCompletedSignatureAudit() public {
+        uint256 id = _primeForSettlement();
+        uint256 epoch = signer.signedEpochOf(id);
+        bytes32 digest = signer.instructionDigestOf(id);
+        _rotateSignersForTest();
+        assertEq(signer.signedEpochOf(id), epoch);
+        assertEq(signer.signatureCount(id), 2);
+        assertTrue(signer.hasSigned(id, signer1));
+        assertEq(signer.instructionDigestOf(id), digest);
+        assertEq(signer.collectedSignersAtEpoch(id, epoch).length, 2);
+        vm.prank(owner);
+        signer.setSigningWindow(4 days);
+        (, bytes32 historicalDigest) = signer.getInstruction(id);
+        assertEq(historicalDigest, digest);
+        _settle(id, keccak256("after rotation"));
+        assertEq(uint8(registry.statusOf(id)), uint8(IRedemptionTypes.Status.Settled));
+    }
+
+    function test_Rotation_PreservesCompletedReviewAudit() public {
+        vm.prank(owner);
+        idRegistry.setSanctioned(bob, true);
+        uint256 id = _approvedForRotation();
+        vm.prank(boardMember1);
+        breaker.voteReject(id);
+        vm.prank(boardMember2);
+        breaker.voteReject(id);
+        uint256 epoch = breaker.resolvedEpochOf(id);
+        _rotateBoardForTest();
+        assertEq(breaker.rejectCountOf(id), 2);
+        assertTrue(breaker.hasVoted(id, boardMember1));
+        (, uint256 rejections) = breaker.votesAtEpoch(id, epoch);
+        assertEq(rejections, 2);
+        assertEq(uint8(registry.statusOf(id)), uint8(IRedemptionTypes.Status.Rejected));
+    }
+
+    function test_Rotation_InvalidUpdateRollsBackConfiguration() public {
+        uint256 epoch = signer.signerEpoch();
+        address[] memory members = new address[](2);
+        members[0] = stranger;
+        members[1] = stranger;
+        vm.prank(owner);
+        vm.expectRevert(InstructionSigner.DuplicateSigner.selector);
+        signer.setSigners(members, 2);
+        assertEq(signer.signerEpoch(), epoch);
+        assertTrue(signer.isSigner(signer1));
+        assertFalse(signer.isSigner(stranger));
+        epoch = breaker.boardEpoch();
+        vm.prank(owner);
+        vm.expectRevert(CircuitBreaker.DuplicateMember.selector);
+        breaker.setBoard(members, 2);
+        assertEq(breaker.boardEpoch(), epoch);
+        assertTrue(breaker.isBoardMember(boardMember1));
+        assertFalse(breaker.isBoardMember(stranger));
+    }
+
+    function test_Rotation_RetainedBoardMemberCanVoteAgain() public {
+        vm.prank(owner);
+        idRegistry.setSanctioned(bob, true);
+        uint256 id = _approvedForRotation();
+        vm.prank(boardMember1);
+        breaker.voteApprove(id);
+        address[] memory members = new address[](2);
+        members[0] = boardMember1;
+        members[1] = stranger;
+        vm.prank(owner);
+        breaker.setBoard(members, 2);
+        assertFalse(breaker.hasVoted(id, boardMember1));
+        vm.prank(boardMember1);
+        breaker.voteApprove(id);
+        assertEq(breaker.approveCountOf(id), 1);
+        vm.prank(stranger);
+        breaker.voteApprove(id);
+        assertEq(uint8(registry.statusOf(id)), uint8(IRedemptionTypes.Status.Approved));
+    }
+
+    function test_Rotation_ReaddedSignerCannotReuseOldSignature() public {
+        uint256 id = _approvedForRotation();
+        (, bytes32 oldDigest) = signer.getInstruction(id);
+        (uint8 v, bytes32 r, bytes32 sigS) = vm.sign(PK_SIG1, oldDigest);
+        _sign(id, PK_SIG1);
+        _rotateSignersForTest();
+        address[] memory members = new address[](2);
+        members[0] = signer1;
+        members[1] = signer2;
+        vm.prank(owner);
+        signer.setSigners(members, 2);
+        assertEq(signer.signatureCount(id), 0);
+        vm.expectRevert();
+        signer.submitSignature(id, abi.encodePacked(r, sigS, v));
+        _sign(id, PK_SIG1);
+        _sign(id, PK_SIG2);
+        assertEq(uint8(registry.statusOf(id)), uint8(IRedemptionTypes.Status.Signed));
+    }
+
+    function test_Rotation_SameConfigurationStartsFreshEpochs() public {
+        uint256 id = _approvedForRotation();
+        _sign(id, PK_SIG1);
+        uint256 epoch = signer.signerEpoch();
+        address[] memory members = new address[](3);
+        members[0] = signer1;
+        members[1] = signer2;
+        members[2] = signer3;
+        vm.prank(owner);
+        signer.setSigners(members, 2);
+        assertEq(signer.signerEpoch(), epoch + 1);
+        assertEq(signer.signatureCount(id), 0);
+        epoch = breaker.boardEpoch();
+        members = new address[](2);
+        members[0] = boardMember1;
+        members[1] = boardMember2;
+        vm.prank(owner);
+        breaker.setBoard(members, 2);
+        assertEq(breaker.boardEpoch(), epoch + 1);
+    }
 }

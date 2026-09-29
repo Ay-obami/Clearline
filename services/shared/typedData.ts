@@ -6,7 +6,7 @@ import { TypedDataDomain, TypedDataField } from "ethers";
  *
  *   RedemptionInstruction(bytes32 assetId,address holder,uint256 amount,
  *     address destination,uint8 triggerType,bytes32 sourceEventHash,
- *     bytes32 complianceHash,uint256 nonce,uint256 deadline)
+ *     bytes32 complianceHash,uint256 nonce,uint256 deadline,uint256 signerEpoch)
  */
 export const instructionTypes: Record<string, TypedDataField[]> = {
   RedemptionInstruction: [
@@ -19,6 +19,7 @@ export const instructionTypes: Record<string, TypedDataField[]> = {
     { name: "complianceHash", type: "bytes32" },
     { name: "nonce", type: "uint256" },
     { name: "deadline", type: "uint256" },
+    { name: "signerEpoch", type: "uint256" },
   ],
 };
 
@@ -28,7 +29,7 @@ export function instructionDomain(
 ): TypedDataDomain {
   return {
     name: "Clearline",
-    version: "1",
+    version: "2",
     chainId,
     verifyingContract,
   };
@@ -48,5 +49,6 @@ export function settlementDomain(chainId: number, verifyingContract: string): Ty
   };
 }
 
-export const EIP712_VERSION = "1";
+// Release-instruction version; settlement confirmations remain version 1.
+export const EIP712_VERSION = "2";
 export const EIP712_NAME = "Clearline";

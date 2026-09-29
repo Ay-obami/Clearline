@@ -27,6 +27,8 @@ class ClearlineSigner {
     wallet;
     chainId;
     signedCount = 0;
+    nextRedemptionId = 1n;
+    scanning = false;
     constructor(cfg) {
         const provider = new ethers_1.JsonRpcProvider(cfg.rpcUrl);
         this.wallet = new ethers_1.Wallet(cfg.privateKey, provider);
@@ -35,6 +37,9 @@ class ClearlineSigner {
         this.chainId = cfg.chainId;
     }
     async start() {
+        if (await this.signerContract.VERSION() !== "2") {
+            throw new Error("This service requires the Clearline v2 InstructionSigner; migrate addresses before starting.");
+        }
         const isSigner = await this.signerContract.isSigner(this.wallet.address);
         console.log(`[signer ${this.wallet.address}] ${isSigner ? "registered" : "NOT in signer set"} — watching for Approved redemptions`);
         const tick = async () => {
@@ -49,20 +54,36 @@ class ClearlineSigner {
         setInterval(tick, Number(process.env.POLL_MS || 4000));
     }
     async scan() {
-        const provider = this.registry.runner.provider;
-        const latest = await provider.getBlockNumber();
-        const from = Math.max(0, latest - 4000);
-        const events = await this.registry.queryFilter(this.registry.filters.RedemptionRequested(), from, latest);
-        for (const e of events) {
-            if (!("args" in e))
-                continue;
-            const id = Number(e.args.id);
-            await this.trySign(id);
+        if (this.scanning)
+            return;
+        this.scanning = true;
+        try {
+            const count = BigInt(await this.registry.redemptionCount());
+            if (this.nextRedemptionId > count)
+                this.nextRedemptionId = 1n;
+            // Revisit every ID over bounded sweeps: rotations do not emit another
+            // RedemptionRequested event, and old pending work must remain discoverable.
+            for (let visited = 0; visited < 50 && this.nextRedemptionId <= count; visited++) {
+                const id = this.nextRedemptionId++;
+                try {
+                    await this.trySign(id);
+                }
+                catch (e) {
+                    console.error(`[signer] redemption #${id}: ${e}`);
+                }
+            }
+        }
+        finally {
+            this.scanning = false;
         }
     }
     async trySign(id) {
         const status = Number(await this.registry.statusOf(id));
         if (status !== contracts_1.Status.Approved)
+            return;
+        if (!await this.signerContract.isSigner(this.wallet.address))
+            return;
+        if (await this.signerContract.hasSigned(id, this.wallet.address))
             return;
         const [instr, digest] = await this.signerContract.getInstruction(id);
         const value = {
@@ -75,6 +96,7 @@ class ClearlineSigner {
             complianceHash: instr.complianceHash,
             nonce: instr.nonce,
             deadline: instr.deadline,
+            signerEpoch: instr.signerEpoch,
         };
         const signature = await this.wallet.signTypedData((0, typedData_1.instructionDomain)(this.chainId, await this.signerContract.getAddress()), typedData_1.instructionTypes, value);
         const tx = await this.signerContract.submitSignature(id, signature);
