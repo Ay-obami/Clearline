@@ -1,6 +1,8 @@
 "use client";
 import { useState } from "react";
 import { useAccount, useWriteContract, usePublicClient } from "wagmi";
+import { config, signerVersionAbi } from "./contracts";
+import { requireDeploymentReady } from "./deployment";
 import { decodeErrorResult, type Abi } from "viem";
 
 /** Walk the viem/wagmi error cause chain for the raw revert bytes. */
@@ -92,7 +94,7 @@ export function errText(e: unknown, abi?: Abi, decimals = 18): string {
  * human-readable strings on the write path (`'name' in item` throws).
  */
 export function useTx() {
-  const { address: account } = useAccount();
+  const { address: account, chainId } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const pc = usePublicClient();
   const [pending, setPending] = useState(false);
@@ -101,7 +103,7 @@ export function useTx() {
   const [lastHash, setLastHash] = useState<string | null>(null); // mined tx hash
 
   async function run(
-    address: string,
+    address: string | undefined,
     abi: Abi,
     functionName: string,
     args: readonly unknown[]
@@ -111,6 +113,12 @@ export function useTx() {
     setLastHash(null);
     setPending(true);
     try {
+      if (!pc || !account) throw new Error("Connect a wallet before transacting");
+      requireDeploymentReady(config, "2", chainId);
+      const version = await pc.readContract({ address: config.signer!, abi: signerVersionAbi, functionName: "VERSION" });
+      requireDeploymentReady(config, version, chainId);
+      const targets = [config.token, config.registry, config.identity, config.directBurn, config.requestLock, config.compliance, config.signer, config.breaker, config.settlement];
+      if (!address || !targets.some(target => target === address)) throw new Error("Transaction target is not configured");
       // Pre-flight: catch revert reasons (insufficient allowance/balance,
       // not verified, paused, etc.) before the user pays gas.
       if (pc && account) {

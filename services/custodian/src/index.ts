@@ -1,3 +1,4 @@
+import { envInteger } from "../../shared/config";
 import { createServer } from "http";
 import { MockCustodian } from "./custodian";
 
@@ -29,17 +30,19 @@ async function main() {
     registryAddress: process.env.REGISTRY_ADDRESS!,
     signerContract: process.env.SIGNER_CONTRACT!,
     settlementAddress: process.env.SETTLEMENT_ADDRESS!,
-    chainId: Number(process.env.CHAIN_ID || 133),
-    delayMs: Number(process.env.SETTLEMENT_DELAY_MS ?? 15000),
+    chainId: envInteger("CHAIN_ID", 133, 1),
+    delayMs: envInteger("SETTLEMENT_DELAY_MS", 15000, 0, 2147483647),
   });
 
-  const port = Number(process.env.HEALTH_PORT || process.env.PORT || 8081);
+  const port = process.env.HEALTH_PORT !== undefined
+    ? envInteger("HEALTH_PORT", 8081, 1, 65535)
+    : envInteger("PORT", 8081, 1, 65535);
+  await custodian.start();
   createServer((_req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: true, service: "custodian", settleCount: custodian.settleCount }));
   }).listen(port, () => console.log(`[custodian] health on :${port}`));
 
-  await custodian.start();
 }
 
 main().catch((e) => {

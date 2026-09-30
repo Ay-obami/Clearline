@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MockCustodian = void 0;
+const config_1 = require("../../shared/config");
 const ethers_1 = require("ethers");
 const contracts_1 = require("../../shared/contracts");
 const typedData_1 = require("../../shared/typedData");
@@ -26,7 +27,10 @@ class MockCustodian {
     chainId;
     delayMs;
     settleCount = 0;
+    nextRedemptionId = 1n;
+    scanning = false;
     constructor(cfg) {
+        (0, config_1.validateConfig)(cfg);
         const provider = new ethers_1.JsonRpcProvider(cfg.rpcUrl);
         this.wallet = new ethers_1.Wallet(cfg.privateKey, provider);
         this.registry = new ethers_1.Contract(cfg.registryAddress, contracts_1.registryAbi, this.wallet);
@@ -36,6 +40,8 @@ class MockCustodian {
         this.delayMs = cfg.delayMs ?? 15000;
     }
     async start() {
+        await (0, config_1.verifyChain)(this.wallet, this.chainId);
+        const pollMs = (0, config_1.envInteger)("POLL_MS", 4000, 1, 2147483647);
         console.log(`[custodian ${this.wallet.address}] watching for InstructionSigned`);
         const tick = async () => {
             try {
@@ -45,18 +51,31 @@ class MockCustodian {
                 console.error(`[custodian] poll error: ${e}`);
             }
         };
-        await tick();
-        setInterval(tick, Number(process.env.POLL_MS || 4000));
+        // Startup validation is complete; a slow initial sweep must not delay health binding.
+        void tick();
+        setInterval(tick, pollMs);
     }
     async scan() {
-        const latest = await this.registry.runner.provider.getBlockNumber();
-        const from = Math.max(0, latest - 4000);
-        const events = await this.signerContract.queryFilter(this.signerContract.filters.InstructionSigned(), from, latest);
-        for (const e of events) {
-            if (!("args" in e))
-                continue;
-            const id = Number(e.args.id);
-            await this.process(id);
+        if (this.scanning)
+            return;
+        this.scanning = true;
+        try {
+            const count = BigInt(await this.registry.redemptionCount());
+            if (this.nextRedemptionId > count)
+                this.nextRedemptionId = 1n;
+            // Reconcile registry state, including work signed before the former log window.
+            for (let visited = 0; visited < 50 && this.nextRedemptionId <= count; visited++) {
+                const id = this.nextRedemptionId++;
+                try {
+                    await this.process(id);
+                }
+                catch (e) {
+                    console.error(`[custodian] redemption #${id}: ${e}`);
+                }
+            }
+        }
+        finally {
+            this.scanning = false;
         }
     }
     async process(id) {
