@@ -23,6 +23,24 @@ import "../src/mocks/MockRWAToken.sol";
  * MINT_AMOUNT (optional; missing lists fall back to the deployer address).
  */
 contract ClearlineDeploy is Script {
+    struct Roles {
+        address[] signers;
+        address[] board;
+        uint256 signerThreshold;
+        uint256 boardThreshold;
+    }
+
+    function _loadRoles(address deployer) internal view returns (Roles memory roles) {
+        uint256 signerCount = vm.envOr("SIGNER_COUNT", uint256(3));
+        uint256 boardCount = vm.envOr("BOARD_COUNT", uint256(2));
+        roles.signerThreshold = vm.envOr("SIGNER_THRESHOLD", uint256(2));
+        roles.boardThreshold = vm.envOr("BOARD_THRESHOLD", uint256(2));
+        require(roles.signerThreshold > 0 && roles.signerThreshold <= signerCount, "bad signer cfg");
+        require(roles.boardThreshold > 0 && roles.boardThreshold <= boardCount, "bad board cfg");
+        roles.signers = _readList("SIGNER_ADDRS", deployer, signerCount);
+        roles.board = _readList("BOARD_ADDRS", deployer, boardCount);
+    }
+
     function run() external {
         uint256 key = vm.envUint("DEPLOYER_KEY");
         address deployer = vm.addr(key);
@@ -32,6 +50,9 @@ contract ClearlineDeploy is Script {
         if (block.chainid == 177 && !vm.envOr("CONFIRM_MAINNET", false)) {
             revert("MAINNET GUARD: re-run with CONFIRM_MAINNET=true to broadcast");
         }
+
+        // Resolve every role before broadcasting. Public networks never use demo keys.
+        Roles memory roles = _loadRoles(deployer);
 
         vm.startBroadcast(key);
 
@@ -69,6 +90,7 @@ contract ClearlineDeploy is Script {
         registry.setCircuitBreaker(address(breaker));
         registry.setInstructionSigner(address(signer));
         registry.setSettlementRecorder(address(settlement));
+        signer.setCircuitBreaker(address(breaker));
 
         // FR5: optional explicit finality depth (12–20 recommended; defaults
         // live inside RedemptionRegistry). Applies chain-wide unless per-asset
@@ -81,34 +103,10 @@ contract ClearlineDeploy is Script {
             }
         }
 
-        {
-            uint256 signerCount = vm.envOr("SIGNER_COUNT", uint256(3));
-            uint256 signerThreshold = vm.envOr("SIGNER_THRESHOLD", uint256(2));
-            require(signerThreshold <= signerCount && signerCount <= 10 && signerThreshold >= 1, "bad signer cfg");
-            address[] memory sigs = _readList("SIGNER_ADDRS", deployer, signerCount);
-            if (!_envExists("SIGNER_ADDRS")) {
-                uint256 first = _deriveFrom(deployer);
-                sigs[0] = vm.addr(first);
-                sigs[1] = vm.addr(first + 1);
-                if (signerCount >= 3) sigs[2] = vm.addr(first + 2);
-            }
-            signer.setSigners(sigs, signerThreshold);
-            console2.log("SIGNERS_%d_THRESHOLD_%d", signerCount, signerThreshold);
-        }
-
-        {
-            uint256 boardCount = vm.envOr("BOARD_COUNT", uint256(2));
-            uint256 boardThreshold = vm.envOr("BOARD_THRESHOLD", uint256(2));
-            require(boardThreshold <= boardCount && boardCount > 0 && boardThreshold >= 1, "bad board cfg");
-            address[] memory board = _readList("BOARD_ADDRS", deployer, boardCount);
-            if (!_envExists("BOARD_ADDRS")) {
-                uint256 b0 = _deriveFrom(deployer) + 100;
-                board[0] = vm.addr(b0);
-                if (boardCount >= 2) board[1] = vm.addr(b0 + 1);
-            }
-            breaker.setBoard(board, boardThreshold);
-            console2.log("BOARD_%d_THRESHOLD_%d", boardCount, boardThreshold);
-        }
+        signer.setSigners(roles.signers, roles.signerThreshold);
+        console2.log("SIGNERS_%d_THRESHOLD_%d", roles.signers.length, roles.signerThreshold);
+        breaker.setBoard(roles.board, roles.boardThreshold);
+        console2.log("BOARD_%d_THRESHOLD_%d", roles.board.length, roles.boardThreshold);
 
         address attestor = vm.envOr("ATTESTOR_ADDR", deployer);
         settlement.setAttestor(attestor, true);
@@ -138,31 +136,31 @@ contract ClearlineDeploy is Script {
         console2.log("HOLDER_ADDR=%s", holder);
     }
 
-    /// @dev env comma-list -> address[]; unset/garbage entries padded with `fallback_`.
-    function _readList(string memory envKey, address fallback_, uint256 max)
-        internal
-        view
-        returns (address[] memory arr)
+    /// @dev Exact comma list. Deterministic test identities exist only on local chain 31337.
+    function _readList(string memory envKey, address fallback_, uint256 count)
+        internal view returns (address[] memory arr)
     {
-        arr = new address[](max);
-        if (!_envExists(envKey)) {
-            for (uint256 i = 0; i < max; i++) arr[i] = fallback_;
+        require(count > 0 && count <= 10, "Deploy: invalid role count");
+        arr = new address[](count);
+        bytes memory input = _envExists(envKey) ? bytes(vm.envString(envKey)) : bytes("");
+        if (input.length == 0) {
+            require(block.chainid == 31337, "Deploy: explicit roles required");
+            uint256 first = _deriveFrom(fallback_) + uint256(keccak256(bytes(envKey))) % (2 ** 128);
+            for (uint256 i; i < count; ++i) arr[i] = vm.addr(first + i + 1);
             return arr;
         }
-        bytes memory b = bytes(vm.envString(envKey));
         uint256 idx;
-        bytes memory cur;
-        for (uint256 i = 0; i <= b.length; i++) {
-            if (i == b.length || b[i] == ",") {
-                if (idx < max) arr[idx] = _toAddr(string(cur), fallback_);
-                idx++;
-                cur = "";
-            } else {
-                cur = bytes.concat(cur, b[i]);
-            }
+        bytes memory current;
+        for (uint256 i; i <= input.length; ++i) {
+            if (i == input.length || input[i] == ",") {
+                require(idx < count, "Deploy: role count mismatch");
+                address role = _toAddr(string(current), fallback_);
+                for (uint256 j; j < idx; ++j) require(arr[j] != role, "Deploy: duplicate role");
+                arr[idx++] = role;
+                current = "";
+            } else current = bytes.concat(current, input[i]);
         }
-        for (uint256 i = idx; i < max; i++) arr[i] = fallback_;
-        return arr;
+        require(idx == count, "Deploy: role count mismatch");
     }
 
     function _envExists(string memory envKey) internal view returns (bool) {
@@ -179,11 +177,13 @@ contract ClearlineDeploy is Script {
         return uint256(keccak256(abi.encodePacked("Clearline.derive", a))) % (2 ** 128);
     }
 
-    function _toAddr(string memory s, address fallback_) internal pure returns (address) {
-        if (bytes(s).length != 42) return fallback_;
+    function _toAddr(string memory s, address) internal pure returns (address) {
+        require(bytes(s).length == 42, "Deploy: malformed role");
+        require(bytes(s)[0] == "0" && bytes(s)[1] == "x", "Deploy: malformed role");
         bytes memory b = bytes(s);
         uint160 v;
         for (uint256 i = 2; i < 42; i++) v = v * 16 + _hex(b[i]);
+        require(v != 0, "Deploy: zero role");
         return address(v);
     }
 
@@ -192,6 +192,6 @@ contract ClearlineDeploy is Script {
         if (v >= 48 && v <= 57) return v - 48;
         if (v >= 97 && v <= 102) return v - 87;
         if (v >= 65 && v <= 70) return v - 55;
-        return 0;
+        revert("Deploy: invalid hex");
     }
 }

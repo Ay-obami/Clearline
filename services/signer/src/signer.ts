@@ -1,3 +1,4 @@
+import { validateConfig, verifyChain, envInteger } from "../../shared/config";
 import { JsonRpcProvider, Wallet, Contract } from "ethers";
 import { registryAbi, signerAbi, Status } from "../../shared/contracts";
 import { instructionTypes, instructionDomain } from "../../shared/typedData";
@@ -49,6 +50,7 @@ export class ClearlineSigner {
     signerContract: string;
     chainId: number;
   }) {
+    validateConfig(cfg);
     const provider = new JsonRpcProvider(cfg.rpcUrl);
     this.wallet = new Wallet(cfg.privateKey, provider);
     this.signerContract = new Contract(cfg.signerContract, signerAbi, this.wallet);
@@ -60,6 +62,8 @@ export class ClearlineSigner {
     if (await this.signerContract.VERSION() !== "2") {
       throw new Error("This service requires the Clearline v2 InstructionSigner; migrate addresses before starting.");
     }
+    await verifyChain(this.wallet, this.chainId);
+    const pollMs = envInteger("POLL_MS", 4000, 1, 2147483647);
     const isSigner = await this.signerContract.isSigner(this.wallet.address);
     console.log(
       `[signer ${this.wallet.address}] ${isSigner ? "registered" : "NOT in signer set"} — watching for Approved redemptions`
@@ -72,8 +76,9 @@ export class ClearlineSigner {
         console.error(`[signer] poll error: ${e}`);
       }
     };
-    await tick();
-    setInterval(tick, Number(process.env.POLL_MS || 4000));
+    // Startup validation is complete; a slow initial sweep must not delay health binding.
+    void tick();
+    setInterval(tick, pollMs);
   }
 
   private async scan(): Promise<void> {
@@ -105,6 +110,11 @@ export class ClearlineSigner {
     if (await this.signerContract.hasSigned(id, this.wallet.address)) return;
 
     const [instr, digest] = await this.signerContract.getInstruction(id);
+    const block = await this.wallet.provider!.getBlock("latest");
+    if (!block) throw new Error("Latest chain block is unavailable");
+    // Match Solidity: equality is still valid; only strictly later timestamps expire.
+    if (BigInt(block.timestamp) > BigInt(instr.deadline)) return;
+
     const value: InstructionValue = {
       assetId: instr.assetId,
       holder: instr.holder,

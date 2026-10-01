@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+const config_1 = require("../../shared/config");
 const http_1 = require("http");
 const signer_1 = require("./signer");
 /**
@@ -27,16 +28,18 @@ async function main() {
         privateKey: process.env.PRIVATE_KEY,
         registryAddress: process.env.REGISTRY_ADDRESS,
         signerContract: process.env.SIGNER_CONTRACT,
-        chainId: Number(process.env.CHAIN_ID || 133),
+        chainId: (0, config_1.envInteger)("CHAIN_ID", 133, 1),
     });
     // Health endpoint (Railway-friendly, no secret exposure).
     // Railway injects PORT and healthchecks it; HEALTH_PORT is our own override.
-    const port = Number(process.env.HEALTH_PORT || process.env.PORT || 8080);
+    const port = process.env.HEALTH_PORT !== undefined
+        ? (0, config_1.envInteger)("HEALTH_PORT", 8080, 1, 65535)
+        : (0, config_1.envInteger)("PORT", 8080, 1, 65535);
+    await signer.start();
     (0, http_1.createServer)((_req, res) => {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true, service: "signer", signedCount: signer.signedCount }));
     }).listen(port, () => console.log(`[signer] health on :${port}`));
-    await signer.start();
 }
 main().catch((e) => {
     console.error(e);

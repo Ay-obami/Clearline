@@ -6,12 +6,15 @@
  * script picks the process by the SERVICE_ROLE env var:
  *   SERVICE_ROLE=signer   -> signer service (watches + signs instructions)
  *   SERVICE_ROLE=custodian-> mock custodian / settlement relayer
- * A missing/unknown role defaults to signer and logs loudly.
+ * A missing role defaults to signer; an unknown role fails before either starts.
  *
  * Compiled by tsc to dist/scripts/start.js; runs under plain `node` at runtime
  * (no tsx/ts-node dependency in production).
  */
 const role = (process.env.SERVICE_ROLE ?? "signer").toLowerCase();
+if (role !== "signer" && role !== "custodian") {
+    throw new Error("SERVICE_ROLE must be signer or custodian");
+}
 // Relative to this file's compiled location (dist/scripts/): the workspace
 // sources live one level up at dist/{signer,custodian}/src/index.js.
 if (role === "custodian") {

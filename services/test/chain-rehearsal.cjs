@@ -107,6 +107,8 @@ async function main() {
     assert.equal(await signer.deadlineFor(first), signedDeadline);
     assert.equal((await signer.getInstruction(first))[1], finalized.instructionHash);
     assert.deepEqual(Array.from(await signer.collectedSigners(first)), [a.address, c.address]);
+    // Historical signed work must survive downtime longer than the former 4000-block log window.
+    await provider.send("anvil_mine", ["0x1001"]);
     await custodian.scan();
     assert.equal(await registry.statusOf(first), BigInt(Status.Settled));
     assert.equal(custodian.settleCount, 1);
@@ -138,6 +140,19 @@ async function main() {
     assert.equal(await registry.statusOf(second), BigInt(Status.Settled));
     assert.equal(custodian.settleCount, 2);
     console.log('PASS: partial board quorum reset, removed voter rejection, retained voter reapproval and second settlement');
+    await send(compliance.configureAsset(token.target, ZeroAddress, 0));
+    const expired = await redeem(100);
+    assert.equal(await registry.statusOf(expired), BigInt(Status.Approved));
+    const expiredDeadline = await signer.deadlineFor(expired);
+    await provider.send('evm_setNextBlockTimestamp', [Number(expiredDeadline) + 1]);
+    await provider.send('evm_mine', []);
+    const submittedBefore = services[1].signedCount;
+    await services[1].scan();
+    assert.equal(services[1].signedCount, submittedBefore, 'expired pending work must not submit');
+    assert.equal(await signer.signatureCount(expired), 0n);
+    assert.equal(await registry.statusOf(expired), BigInt(Status.Approved), 'expiry has no automatic resolution policy');
+    console.log('PASS: historical signed backlog and expired pending instruction suppression');
+
   } finally {
     for (const provider of providers) provider.destroy();
     if (node.exitCode === null && node.pid) {

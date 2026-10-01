@@ -14,9 +14,9 @@ Clearline connects an on-chain token redemption event to the off-chain release o
 - **Circuit-breaker/manual-review path** with board approval/rejection
 - **Finality-aware execution** before downstream processing begins
 - **On-chain settlement attestation** with a traceable audit chain
-- **44 Foundry tests** with ~**90.6% line coverage** on core contracts
+- **Regression-tested v2 authorization and deployment configuration**; historical v1 had 44 tests and ~90.6% core line coverage (v2 coverage is not remeasured)
 - **Next.js frontend** plus independent Node.js signer/custodian services
-- **HSK testnet deployment** with Blockscout-verified contracts
+- **Historical v1 HSK testnet deployment** with Blockscout-verified contracts; current v2 requires fresh deployment
 - **Mainnet deployment guardrails** including explicit confirmation and pre-broadcast cost checks
 
 ## Why this exists
@@ -45,7 +45,9 @@ Every redemption is tagged by trigger type and traceable end-to-end via `Redempt
 
 ## Authorization rotation v2 (unreleased)
 
-This branch introduces signer/board configuration epochs and EIP-712 release-instruction version 2. It requires coordinated new contract addresses and updated clients; existing testnet deployments remain v1. See [rotation policy and migration gates](docs/AUTHORIZATION_ROTATION_V2.md). The branch has 62 Foundry tests and seven signer-service regressions. The 44-test/coverage figures elsewhere describe the original v1 release; coverage has not been remeasured for v2.
+This branch introduces signer/board configuration epochs and EIP-712 release-instruction version 2. It requires coordinated new contract addresses and updated clients; existing testnet deployments remain v1. See [rotation policy and migration gates](docs/AUTHORIZATION_ROTATION_V2.md). The v2 suite includes authorization/configuration regressions, service backlog/expiry tests and an actual local deployment-script smoke. The 44-test/coverage figures elsewhere describe the original v1 release; coverage has not been remeasured for v2.
+
+See the [operator runbook](docs/OPERATOR_RUNBOOK.md) for manifest verification, historical record retention, cutover and incident handling.
 
 ## Security model
 
@@ -121,7 +123,7 @@ It exercises the happy path, compliance flag + board override, and request-and-l
 ### Prerequisites
 
 - [Foundry](https://book.getfoundry.sh/)
-- Node.js ≥ 20 for the frontend, ≥ 24 for services
+- Node.js 22 for the frontend (verified in CI); Node.js ≥ 20 for services
 - EIP-1193 wallet such as MetaMask
 
 ### Contracts

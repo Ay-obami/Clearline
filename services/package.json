@@ -15,7 +15,8 @@
     "start:signer": "tsx signer/src/index.ts",
     "start:custodian": "tsx custodian/src/index.ts",
     "test": "npm run build && node --test test/*.test.cjs",
-    "test:chain": "npm run build && forge build --root .. && node test/chain-rehearsal.cjs"
+    "test:chain": "npm run build && forge build --root .. && node test/chain-rehearsal.cjs",
+    "test:deployment": "node test/deployment-smoke.cjs"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

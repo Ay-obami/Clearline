@@ -36,10 +36,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 isMainnet ? "bg-pending-tint text-pending ring-1 ring-pending/40" : "bg-finality-tint text-finality"
               }`}
             >
-              {isMainnet ? "Mainnet" : "Testnet"}
+              {!config.ready ? "Unconfigured" : isMainnet ? "Mainnet" : "Testnet"}
             </span>
             <span className="hidden text-xs text-mute sm:inline font-mono">
-              {isMainnet ? "" : "demo"}
+              {!config.ready || isMainnet ? "" : "demo"}
             </span>
           </div>
           <ConnectButton />
